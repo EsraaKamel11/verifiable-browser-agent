@@ -10,7 +10,7 @@ Every claim below is a design decision, not a report of working code. The Design
 
 A browser agent that automates an authenticated web workflow and **can prove whether the work actually happened**, against a system of record rather than against the page that claims success.
 
-It is built against a simulated payer-enrollment portal with a planted silent-failure case, three layout variants, and an acceptance rubric of eight requirements. Both the simulation and the agent are authored here. Section 10 states what that costs the artifact's evidentiary value and how it is mitigated.
+It is designed against a simulated payer-enrollment portal with a planted silent-failure case, three layout variants, and an acceptance rubric of eight requirements. Both the simulation and the agent are authored here. Section 10 states what that costs the artifact's evidentiary value and how it is mitigated.
 
 ### The thesis, in one line
 
@@ -122,7 +122,7 @@ This resolves a real tension. Verification requires knowing what "done" means an
 ```yaml
 contract: payer_enrollment
 version: 3
-site: payerconnect
+site: enrollment_portal
 goal: "Enroll a provider with their payer and confirm it posted to the payer's records."
 
 oracle:
@@ -156,7 +156,7 @@ steps:
     satisfied_when: oracle.confirmed
     postconditions:                 # deterministic page_verify predicates
       - text_present: "Submitted successfully"
-      - text_absent: "Review required"
+      - text_absent: "Please confirm you have reviewed"
 
 pii:
   redact: [password, otp]
@@ -169,7 +169,7 @@ pii:
 
 ### 4.2 The acceptance gate
 
-Runs before any browser opens. Refusal is a first-class outcome.
+Runs before any browser opens. Refusal is a first-class outcome. The transcript below is illustrative.
 
 | Contract state | Autonomy granted |
 |---|---|
@@ -208,6 +208,10 @@ Three enforcement points, deliberately redundant:
 2. **The choke point.** `guard.check()` is called inside `execute()`, the only path to a side effect. Memory-originated and resolver-originated actions traverse identical enforcement and emit identical evidence.
 3. **Harness postcondition.** After any tier-3 act, `system_verify` runs whether or not the model asked. **The oracle is not a tool.** If it were, the model could decline to call it.
 
+**The shaping rule.** An action on a submit-type control is classified `kind: submit` at the choke point from element metadata, regardless of what the resolver called it, and is refused unless the current step is tier-3 with a live baseline handle. Without this rule a plain click during a lower-tier step could fire the form and post an unbaselined record.
+
+**Epoch re-binding.** Stored actions carry a stored identity, not a target id. At execution the identity is re-bound to a `target_id` in the current epoch; an id from a stale epoch is refused rather than translated silently.
+
 A hook on SDK tool calls is defense-in-depth for resolver sessions only. It cannot be the gate, because the memory path does not call the SDK at all.
 
 ### 4.4 Credentials
@@ -217,7 +221,11 @@ The model emits `{kind: "fill", target_id: 7, field: "password"}` and never sees
 Two honest limits, stated rather than inherited silently:
 
 - The **login email is not masked**. It appears in observations. Only the password and OTP are protected.
-- The OTP field in the target world is **not a password input**, so any observation of the verify page after fill contains it in cleartext. Capture suppression during the auth phase is therefore load-bearing, not optional.
+- The OTP field in the target world is **not a password input**, so any observation of the auth page after fill contains it in cleartext.
+
+**Therefore the guard scrubs injected literals from every outbound payload**, not only from screenshots: it knows every value it injected and removes those literals from observations sent to a model and from audit records before they are written. Screenshot suppression alone is insufficient, because the loop re-perceives between the actions of a sequence and a post-fill observation of the auth page is guaranteed.
+
+**Provider data is a separate question and is not solved by the above.** Provider names and identifiers necessarily transit the model API on every cold resolution: they are the content of the page being resolved. The redaction list covers credentials only. One genuine mitigation falls out of the architecture rather than from a policy: a memory hit spawns no model session, so a warm run keeps provider data out of the model provider entirely.
 
 ---
 
@@ -239,17 +247,18 @@ def run_step(step: Step, ctx: RunContext) -> StepOutcome:
 
     if step.tier == 3:
         baseline = oracle.read(ctx)                    # before the FIRST action
-    for action in actions:
-        execute(action, step, ctx)                     # choke point; guard inside
-        settle(ctx)                                    # navigation / DOM settle
-    page = page_verify(step, perceive(ctx))            # deterministic predicates
+    page = drive(actions, step, ctx)                   # see below; every act via the choke point
 
     if step.satisfied_when:
-        return system_verify(step, ctx, baseline)      # decides, always
+        return system_verify(step, ctx, baseline, page)   # decides, always
     return StepOutcome(page, verif_strength="on_page", source=source)
 ```
 
 `run_step` returns a typed outcome and **never calls resolution inline**. `run/` owns re-entry, the retry budget, and the circuit breaker, so cross-invocation state is not hidden inside a recursive call.
+
+**`drive()` is one execution model for both paths, and it is session-driven.** On the memory path it replays a stored sequence; on the cold path the resolution session acts turn by turn. Either way each action crosses the choke point individually, the page is re-perceived and settled between actions, and the resulting observation sequence is what 6.3 slices for capture. `resolve_step` does not return a plan for the harness to execute in bulk: tool-grant enforcement and capture-slicing both require turn-by-turn acting.
+
+`system_verify` takes the page verdict as an argument because several of its outcomes are joint: the same unchanged count means DISCREPANCY after a page success, REJECTED after a stated refusal, and VERIFIED-NOT-DONE after an infrastructural failure.
 
 Memory lookup is **by `step_key`, then fingerprints are compared**. Keying the lookup on the fingerprint would make a stale fix a silent miss, indistinguishable in the audit from having no memory at all.
 
@@ -273,14 +282,18 @@ Every outcome is computed against the pre-act baseline. Absolute predicates woul
 |---|---|---|
 | `count == baseline + 1`, identity matches, confirmation matches | CONFIRMED | next step |
 | `count == baseline`, page claimed success | **DISCREPANCY** | escalate this provider; never resolve, never resubmit |
+| `count == baseline + 1`, **identity does not match** | **MISFILED** | stop this provider; escalate; the act posted, but not the act the contract asked for |
 | `count > baseline + 1` | DUPLICATED | stop everything; invariant tripwire |
+| `count == baseline`, page rejected with a stated reason | REJECTED | resolution permitted with the refusal text; write a negative entry |
 | `count == baseline`, page failed infrastructurally | VERIFIED-NOT-DONE | retry permitted; still escalate |
 | oracle unreachable | UNVERIFIABLE | escalate; **never** resubmit |
 | baseline already enrolled | ALREADY_SATISFIED | never submit |
 
 CONFIRMED requires three agreements: the count incremented by one, the recorded identity matches the contract, and **the confirmation number on the page appears in the record**. The third catches a page that mints a confirmation number corresponding to nothing.
 
-DISCREPANCY stops one provider; the rest of the batch proceeds. DUPLICATED stops everything, because under a fresh baseline and a single writer it can only arise from a guard defect.
+MISFILED is the outcome a naive design cannot name: a record was created, so the count moved, but its identity does not match what the contract asked for. It is the failure mode that a memory fix carrying a literal value would produce, and it is why 6.1 requires parameter references.
+
+DISCREPANCY and MISFILED stop one provider; the rest of the batch proceeds. DUPLICATED stops everything, because under a fresh baseline and a single writer it can only arise from a guard defect.
 
 ### 5.4 Three absences, three verdicts
 
@@ -295,6 +308,8 @@ INVALID is adjudicated by the portal, not the oracle: the reconciliation endpoin
 ### 5.5 Ambiguity and restart
 
 **Never retry an irreversible act on ambiguity.** Read the oracle: delta of one means it landed; delta of zero means a retry is permitted. If the oracle is also unreachable, the outcome is UNVERIFIABLE and the run escalates.
+
+**Why not an idempotency key.** The source design passes one with every side-effecting act. A browser driving a rendered form cannot: the form carries no such field and a form post cannot set a header, and reaching past the form to inject one would bypass the enumerated action space that the whole safety argument rests on. Identity is therefore enforced by asking the record instead, which the target rubric explicitly permits.
 
 The same invariant covers a crash between acting and verifying, which requires the baseline and the intent-to-act to be written **atomically** before the act. Restart is a decision made from the record, never a blind resume.
 
@@ -313,7 +328,7 @@ CREATE TABLE learned_fix (
   intent            TEXT NOT NULL,        -- the durable key
   page_fingerprint  TEXT NOT NULL,        -- structural; see 6.2
   resolved_actions  JSONB NOT NULL,       -- ORDERED LIST, not one action
-  match_mode        TEXT NOT NULL,        -- exact_identity required at tier 3
+  match_mode        TEXT NOT NULL,        -- exact_identity | structural; exact_identity required at tier 3
   action_tier       INT  NOT NULL,        -- max tier across the sequence
   polarity          TEXT NOT NULL DEFAULT 'positive',
   failure_mode      TEXT,
@@ -336,6 +351,12 @@ CREATE UNIQUE INDEX one_current_positive_fix_per_step
 The index is scoped to positive polarity so a step can carry one current fix alongside several current negative entries.
 
 **`resolved_actions` is a list** because a real fix can be a sequence: ticking a newly-required checkbox and then submitting is one step with two actions. `still_resolves` is an AND over every element; `action_tier` is the maximum; the sequence re-perceives between actions so each target id is epoch-fresh and each action passes the choke point individually.
+
+**Stored actions carry parameter references, not literals.** This is what makes a fix reusable across the entities a contract runs over. At capture, any target component or value equal to a contract parameter is templated: a payer selection captured on one provider stores `value: "{payer}"`, not `"Aetna"`, and a record link stores `{npi}`, not one provider's identifier. At reuse the references are bound from the current invocation.
+
+Without this, two things break and one of them is dangerous. A fix for opening a record could never re-resolve for a second entity, so the memory-reuse demonstration would silently fall back to cold resolution. Worse, a payer selection captured with a literal would replay on an entity whose correct payer differs, pass the guard (right control, right identity), and post a real record for the wrong value. That is the MISFILED outcome in 5.3, and parameter references are the mechanism that prevents it rather than merely detecting it.
+
+The credential fill already works this way, referring to a field rather than carrying a secret. This generalizes that rule to every parameter the contract names.
 
 **`match_mode = exact_identity` is required at tier 3**, forbidding structural or positional selectors. A positional selector can resolve to the wrong control after a redesign and submit before any verification runs. It can also resolve to the *right* control by luck, which silently demonstrates the blind replay the design exists to prevent.
 
@@ -370,7 +391,9 @@ Formally: find the latest observation whose fingerprint does **not** match entry
 
 The naive version -- "from the last matching observation" -- captures too little. Because the fingerprint excludes control state, the observation after ticking a checkbox still matches the entry fingerprint, so the captured fix would omit the tick and fail on every replay. Memory would miss forever while appearing healthy.
 
-The failed approach is written as a **negative entry** at the same moment, so other providers do not rediscover the same rejection.
+The failed approach is written as a **negative entry** at the same moment, so other entities do not rediscover the same rejection.
+
+**Negative entries have a read path, or they are pointless.** Before a resolution session is spawned for a step, current negative entries matching that step are injected into its context as approaches already known to fail, with the refusal text. An entry is superseded if the same approach later succeeds, so a portal fix cannot leave a permanent blinder. Decay of negative entries is out of scope here and named as such.
 
 **Stated limit:** suffix-slicing is sound only because re-entering the record page re-renders form state from scratch. In a portal where entry state does not reset form state, the rule would drop required earlier actions.
 
@@ -395,7 +418,13 @@ No model judges this. A resolver certifying its own fix is self-certification; a
 
 Two conjuncts are structural rather than checked: the memory API's return type cannot express a verification skip, and tier-3 `execute()` requires a baseline handle whose epoch matches the current step, so the guard refuses without one.
 
-**The divergence from the source design is exactly one clause:** dropping mandatory human approval for tier-3 acts. The rest -- memory suggests, the contract decides, the guard executes, verification is unconditional -- is unchanged.
+**Divergences from the source memory design, stated in full.** The safety chain is unchanged in shape: memory suggests, the contract decides, the guard executes, verification is unconditional. Within that, three things differ:
+
+1. **Mandatory human approval for tier-3 acts is dropped**, replaced by the predicate above. This is the substantive one.
+2. **Confidence no longer gates pre-apply.** The source uses confidence thresholds to decide pre-apply for reversible tiers. Here it ranks and reports only. The justification is the source's own open item, which says to calibrate against an eval harness before quoting a number: shipping an uncalibrated threshold as a gate would make behavior depend on arithmetic nobody has tuned.
+3. **Retrieval is keyed by step, then compared**, rather than keyed by fingerprint. Fingerprint-keyed retrieval makes a stale fix a silent miss, which destroys the evidence that drift was detected.
+
+Also dropped, and named rather than quietly omitted: pinned entries, hold-for-review, and decay of negative entries. None have a role in a build this size.
 
 **Honest cost.** `exact_identity` is a proxy for "same semantics": an identity can persist while behavior changes, and the baseline detects damage after the fact rather than preventing it. That is acceptable here because every rejection surface is pre-commit and the act is reconcilable. The delta baseline also assumes a single writer. **For a payment, a message send, or any act that is neither idempotent, compensable, nor pre-commit-rejectable, the human-approval clause must return.**
 
@@ -414,7 +443,7 @@ Two conjuncts are structural rather than checked: the memory API's return type c
 
 **Tier 1 -- offline units, keyless.** Fingerprint invariance across providers and divergence across layouts; capture-slicing over recorded trajectories; `still_resolves` rejecting a changed accessible name; delta arithmetic; **guard refusals as red tests**. A partition is real only if it fails mechanically, so each refusal gets a test that fires an unauthorized act and asserts it is refused.
 
-Tier 1 also runs perception and fingerprinting against **externally-authored pages** -- snapshots not written for this project -- so the differentiating layer is not validated solely against a world built alongside it.
+Tier 1 also runs perception and fingerprinting against **externally-authored pages** -- snapshots of public form pages, captured and committed as fixtures, not written for this project -- so the differentiating layer is not validated solely against a world built alongside it.
 
 **Tier 2 -- world-backed, deterministic, no model.** One case per outcome row. Legitimate only under two conditions, both required: fixtures are **recorded from tier-3 runs** and schema-versioned, with a contract test binding the stub interface to the resolver interface; and the oracle side is **real HTTP** against the real record store.
 
@@ -479,9 +508,9 @@ The write and supersede events are required because the supersede claim rests on
 
 ### 8.2 Report
 
-The human-readable deliverable, one entry per enrollment:
+The human-readable deliverable, one entry per enrollment. Illustrative:
 
-> **[Provider] ([identifier])** -- submitted 14:22:03. Portal returned "Submitted successfully", confirmation `PC-481920`. **The payer's records show no enrollment for this identifier** (count 0, checked 14:22:05). Confirmation number `PC-481920` does not appear in the payer's records. **Not enrolled -- escalated for review.**
+> **[Provider] ([identifier])** -- submitted 14:22:03. Portal returned "Submitted successfully", confirmation `[number]`. **The payer's records show no enrollment for this identifier** (count 0, checked 14:22:05). That confirmation number does not appear in the payer's records. **Not enrolled -- escalated for review.**
 
 ### 8.3 Re-derivation artifact
 
@@ -527,6 +556,9 @@ Three mitigations, all in scope:
 - The delta baseline assumes a single writer.
 - **For payments or any non-compensable act, the human-approval clause must return.**
 - The reproducibility claim is "re-runnable with reported pass^k, plus an archived exemplar transcript and audit chain" -- not determinism.
+- **Failure-domain independence is simulated.** The portal and the record store are routes on one process with one author. The clean outcome under an outage exists only because the outage flag gates the page routes and not the reconciliation route. Two genuinely independent systems fail in correlated ways this world cannot produce.
+- The outcome taxonomy **refines** the target rubric's single cannot-confirm verdict into two: verified-not-done, where the record answers and shows nothing posted, and unconfirmable, where the record store itself cannot be reached. The first is a stronger result than the rubric asks for. Both escalate visibly, and the report names which one occurred.
+- Provider data transits the model API on cold resolutions; only credentials are redacted.
 
 ### 10.3 Scope
 
@@ -534,7 +566,7 @@ Built: the contract schema and acceptance gate, one compiled workflow, the perce
 
 **Not built:** a contract-authoring UI; a second portal integration; the attestation chapter (a labelled phase 2 that adds element-relative signature input and a two-canvas disambiguation trap).
 
-**A second portal is a new contract, not a code change.** That is the scope answer: it is real work, scoped and priced as a follow-on, and if it required a second agent the contract abstraction would be a lie.
+**A second portal is designed to be a new contract plus, at most, a new oracle adapter.** The contract schema currently defines one oracle kind, an HTTP JSON read; a portal whose source of truth is a report export, an inbox, or a batch file needs an adapter, and that is a code change. The claim is also **untested**: the resolver is general by construction but has been exercised against exactly one contract. What is defensible today is the scoping answer, which is that a second portal is real work priced as a follow-on rather than free plumbing, and that if it required a second *agent* the abstraction would be a lie.
 
 ---
 
