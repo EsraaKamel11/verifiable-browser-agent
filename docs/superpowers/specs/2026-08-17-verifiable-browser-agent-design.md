@@ -208,7 +208,7 @@ Three enforcement points, deliberately redundant:
 2. **The choke point.** `guard.check()` is called inside `execute()`, the only path to a side effect. Memory-originated and resolver-originated actions traverse identical enforcement and emit identical evidence.
 3. **Harness postcondition.** After any tier-3 act, `system_verify` runs whether or not the model asked. **The oracle is not a tool.** If it were, the model could decline to call it.
 
-**The shaping rule.** An action on a submit-type control is classified `kind: submit` at the choke point from element metadata, regardless of what the resolver called it, and is refused unless the current step is tier-3 with a live baseline handle. Without this rule a plain click during a lower-tier step could fire the form and post an unbaselined record.
+**The shaping rule.** An action on a submit-type control is classified `kind: submit` at the choke point from element metadata, regardless of what the resolver called it, and is refused unless the current step is tier-3 with a live baseline handle. The propose-only path in 4.2 has no cross-system baseline to hold and is not built; if it were, an approved act would need an explicit exemption rather than an implicit one. Without this rule a plain click during a lower-tier step could fire the form and post an unbaselined record.
 
 **Epoch re-binding.** Stored actions carry a stored identity, not a target id. At execution the identity is re-bound to a `target_id` in the current epoch; an id from a stale epoch is refused rather than translated silently.
 
@@ -223,9 +223,9 @@ Two honest limits, stated rather than inherited silently:
 - The **login email is not masked**. It appears in observations. Only the password and OTP are protected.
 - The OTP field in the target world is **not a password input**, so any observation of the auth page after fill contains it in cleartext.
 
-**Therefore the guard scrubs injected literals from every outbound payload**, not only from screenshots: it knows every value it injected and removes those literals from observations sent to a model and from audit records before they are written. Screenshot suppression alone is insufficient, because the loop re-perceives between the actions of a sequence and a post-fill observation of the auth page is guaranteed.
+**Therefore the guard scrubs injected literals from every outbound payload**, not only from screenshots: it knows every value it injected and removes those literals from observations sent to a model and from audit records before they are written. Scrubbing respects token boundaries, so a confirmation number that happens to embed a code's digits is not corrupted. Screenshot suppression alone is insufficient, because the loop re-perceives between the actions of a sequence and a post-fill observation of the auth page is guaranteed.
 
-**Provider data is a separate question and is not solved by the above.** Provider names and identifiers necessarily transit the model API on every cold resolution: they are the content of the page being resolved. The redaction list covers credentials only. One genuine mitigation falls out of the architecture rather than from a policy: a memory hit spawns no model session, so a warm run keeps provider data out of the model provider entirely.
+**Provider data is a separate question and is not solved by the above.** Provider names and identifiers necessarily transit the model API on every cold resolution: they are the content of the page being resolved. The redaction list covers credentials only. One genuine mitigation falls out of the architecture rather than from a policy: a memory hit spawns no model session, so a step served from memory keeps provider data out of the model provider entirely. The honest counterweight: one cold resolution of an index step ships every listed provider's details, not only the one being worked on.
 
 ---
 
@@ -240,14 +240,14 @@ def run_step(step: Step, ctx: RunContext) -> StepOutcome:
     if fix and fix.fingerprint != obs.fingerprint:
         audit.stale_fix_detected(fix, obs)             # supersede-on-drift evidence
         fix = None
-    if fix and fix.still_resolves(obs):
-        actions, source = fix.actions, f"memory:{fix.fix_id}"
-    else:
-        actions, source = resolve_step(step, obs, ctx), "cold"
+    baseline = oracle.read(ctx) if step.satisfied_when else None   # BEFORE any action
 
-    if step.tier == 3:
-        baseline = oracle.read(ctx)                    # before the FIRST action
-    page = drive(actions, step, ctx)                   # see below; every act via the choke point
+    if fix and fix.still_resolves(obs):
+        driver, source = replay(fix, ctx.bindings), f"memory:{fix.fix_id}"
+    else:
+        driver, source = resolve_session(step, obs, ctx), "cold"
+
+    page = drive(driver, step, ctx)                    # every act via the choke point
 
     if step.satisfied_when:
         return system_verify(step, ctx, baseline, page)   # decides, always
@@ -256,7 +256,9 @@ def run_step(step: Step, ctx: RunContext) -> StepOutcome:
 
 `run_step` returns a typed outcome and **never calls resolution inline**. `run/` owns re-entry, the retry budget, and the circuit breaker, so cross-invocation state is not hidden inside a recursive call.
 
-**`drive()` is one execution model for both paths, and it is session-driven.** On the memory path it replays a stored sequence; on the cold path the resolution session acts turn by turn. Either way each action crosses the choke point individually, the page is re-perceived and settled between actions, and the resulting observation sequence is what 6.3 slices for capture. `resolve_step` does not return a plan for the harness to execute in bulk: tool-grant enforcement and capture-slicing both require turn-by-turn acting.
+**`drive()` is one execution model for both paths.** Both branches yield a *driver*, never a finished plan: `replay` yields the stored sequence with parameters bound to this invocation, and `resolve_session` yields a live session that emits one action at a time. `drive` pulls actions from either, sends each through the choke point, and re-perceives and settles between them. That observation sequence is what 6.3 slices for capture. Neither branch returns a bulk plan, because tool-grant enforcement and capture-slicing both require turn-by-turn acting.
+
+The baseline read precedes the branch, so it happens before any action on either path. Gating it on `satisfied_when` rather than on the tier keeps the read and its use under one condition; the contract schema requires every tier-3 step to declare `satisfied_when`, so the tier-3 predicate's baseline requirement cannot be met by a step that never reads one.
 
 `system_verify` takes the page verdict as an argument because several of its outcomes are joint: the same unchanged count means DISCREPANCY after a page success, REJECTED after a stated refusal, and VERIFIED-NOT-DONE after an infrastructural failure.
 
@@ -284,6 +286,7 @@ Every outcome is computed against the pre-act baseline. Absolute predicates woul
 | `count == baseline`, page claimed success | **DISCREPANCY** | escalate this provider; never resolve, never resubmit |
 | `count == baseline + 1`, **identity does not match** | **MISFILED** | stop this provider; escalate; the act posted, but not the act the contract asked for |
 | `count > baseline + 1` | DUPLICATED | stop everything; invariant tripwire |
+| `count == baseline`, page failed mechanically | NOT ACTED | resolution permitted; nothing was filed |
 | `count == baseline`, page rejected with a stated reason | REJECTED | resolution permitted with the refusal text; write a negative entry |
 | `count == baseline`, page failed infrastructurally | VERIFIED-NOT-DONE | retry permitted; still escalate |
 | oracle unreachable | UNVERIFIABLE | escalate; **never** resubmit |
@@ -291,7 +294,9 @@ Every outcome is computed against the pre-act baseline. Absolute predicates woul
 
 CONFIRMED requires three agreements: the count incremented by one, the recorded identity matches the contract, and **the confirmation number on the page appears in the record**. The third catches a page that mints a confirmation number corresponding to nothing.
 
-MISFILED is the outcome a naive design cannot name: a record was created, so the count moved, but its identity does not match what the contract asked for. It is the failure mode that a memory fix carrying a literal value would produce, and it is why 6.1 requires parameter references.
+MISFILED is the outcome a naive design cannot name: a record was created, so the count moved, but its identity does not match what the contract asked for.
+
+**A per-entity oracle read cannot see a record filed under the wrong entity**, because it only asks about the entity the contract meant. So on DISCREPANCY the agent reconciles against the **whole table** before concluding: if the confirmation number shown on the page appears under a different entity, the outcome is MISFILED rather than DISCREPANCY, and the misfiled act is visible at act time instead of surfacing only in a post-run sweep. Stated plainly: the per-entity delta catches a wrong *value* under the right entity; the table reconciliation is what catches a wrong *entity*.
 
 DISCREPANCY and MISFILED stop one provider; the rest of the batch proceeds. DUPLICATED stops everything, because under a fresh baseline and a single writer it can only arise from a guard defect.
 
@@ -352,9 +357,13 @@ The index is scoped to positive polarity so a step can carry one current fix alo
 
 **`resolved_actions` is a list** because a real fix can be a sequence: ticking a newly-required checkbox and then submitting is one step with two actions. `still_resolves` is an AND over every element; `action_tier` is the maximum; the sequence re-perceives between actions so each target id is epoch-fresh and each action passes the choke point individually.
 
-**Stored actions carry parameter references, not literals.** This is what makes a fix reusable across the entities a contract runs over. At capture, any target component or value equal to a contract parameter is templated: a payer selection captured on one provider stores `value: "{payer}"`, not `"Aetna"`, and a record link stores `{npi}`, not one provider's identifier. At reuse the references are bound from the current invocation.
+**Stored actions carry parameter references, not literals.** The fix records the parameter bindings of the invocation it was captured under, and **every stored string is templated by substring against those bindings**, not by equality: identity components, values, and URLs alike. A dashboard link whose accessible name reads `1700000001 - Dr. Maria Santos (Family Medicine)` is stored as `{npi} - Dr. Maria Santos (Family Medicine)`; a payer selection is stored as `value: "{payer}"`.
 
-Without this, two things break and one of them is dangerous. A fix for opening a record could never re-resolve for a second entity, so the memory-reuse demonstration would silently fall back to cold resolution. Worse, a payer selection captured with a literal would replay on an entity whose correct payer differs, pass the guard (right control, right identity), and post a real record for the wrong value. That is the MISFILED outcome in 5.3, and parameter references are the mechanism that prevents it rather than merely detecting it.
+**Equality is the wrong test and it fails dangerously.** A target identity that *contains* a parameter alongside unrelated text is equal to nothing, so equality would store it whole. In a portal whose index lists every entity on every visit, that literal identity then re-binds **successfully, to the wrong entity**: the fingerprint matches because the index is entity-invariant, the identity check passes because the stored element really is on the page, and the guard permits it because opening a record is a read. Every later step then operates on the wrong record, and the oracle read for the entity the contract *meant* cannot see it.
+
+**At reuse, bind first, then require an exact match of the bound identity.** After binding, the residual literal is what protects the act: `{npi} - Dr. Maria Santos (Family Medicine)` bound for a different provider yields a string that matches no element, so the lookup misses and resolution runs cold. Substring templating therefore fails safe in both directions. A false positive, where static page text coincidentally contains a parameter value, binds the current value and at worst causes a miss. It can never produce a wrong act.
+
+**Consequence, accepted and stated:** an identity that carries unremovable entity-specific text can never be reused across entities. Where an intent is parameterized, resolution prefers a target that templates completely: navigating to a templated path reuses perfectly, where clicking an index entry cannot. The zero-sessions claim in 7.2 is therefore **per step**, not per run, and the spec does not claim a warm run spawns no sessions at all.
 
 The credential fill already works this way, referring to a field rather than carrying a secret. This generalizes that rule to every parameter the contract names.
 
@@ -379,7 +388,7 @@ Built from **attribute-level data, not accessible names**. Name attributes are v
 
 Selection state is excluded: which option is currently selected is state, not structure. Frame presence is excluded: it does no discriminative work here and a script-attached shadow root can be absent at snapshot time, producing spurious misses.
 
-Accessible-name comparison is reserved for `exact_identity` enforcement at act time, where the stored targets have static names.
+Accessible-name comparison is reserved for `exact_identity` enforcement at act time, where a stored name is either static or fully templated and bound before comparison.
 
 **This must be validated against the real snapshot tool before the design is final.** If accessible names in practice do not absorb field values, the constraint relaxes; if they do, it is load-bearing. First-hour empirical check.
 
@@ -460,7 +469,7 @@ Tier 1 also runs perception and fingerprinting against **externally-authored pag
 | Survives layout change | layout flipped | completes; agent commit hash identical before and after |
 | Audit record | after any run | report schema-validates; the silent-failure entry names its confirmation number and states it appears nowhere in the record |
 | Credential handling | canary scan | no password or OTP literal in model-visible I/O or the audit; no screenshot artifact for auth URLs; credential fills carry placeholders |
-| Memory reuse | heal on one provider, run another | `resolution_source: memory`, resolution sessions = 0, still record-verified |
+| Memory reuse | heal on one provider, run another | the healed step reports `resolution_source: memory` and spawns no session; the run is still record-verified. Asserted per step, not per run: a step whose target carries unremovable entity-specific text resolves cold by design (6.1) |
 | Supersede on drift | learned layout, then a new layout | stale-detection event, re-heal, supersede, no duplicate |
 
 Cases are **self-provisioning**: a case needing a learned fix creates it in setup rather than depending on case order. Memory-off is the **control** for the speed claim, not a second identical run.
