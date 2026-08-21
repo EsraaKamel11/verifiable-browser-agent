@@ -32,3 +32,16 @@ def test_rederivation_rows_carry_the_inputs_and_the_rule():
     assert rows[0]["after_count"] == 0
     assert rows[0]["page_claimed"] is True
     assert "rule" in rows[0]
+
+
+def test_verified_not_done_does_not_claim_portal_success():
+    """The portal-unavailable outcome must not say 'Portal returned a success page'."""
+    audit_not_done = [
+        {"event": "verification", "step_key": "enrollment.submit", "outcome": "verified_not_done",
+         "baseline": {"count": 0}, "after": {"count": 0},
+         "entity": {"npi": "1700000005"},
+         "ts": "2026-08-20T14:22:05Z"},
+    ]
+    text = render_report([], audit_not_done)
+    assert "success page" not in text.lower()
+    assert "unavailable" in text.lower()
