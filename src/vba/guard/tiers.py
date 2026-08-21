@@ -31,7 +31,17 @@ def check(action: Action, ctx: ActionContext) -> None:
 
     # The shaping rule. What the resolver called the action does not decide its tier;
     # the element's own metadata does.
-    effective_tier = 3 if element.is_submit else ctx.step.tier
+    #
+    # The exemption spec 4.3 names ("an approved act would need an explicit
+    # exemption rather than an implicit one"): a step the CONTRACT declares as
+    # form-firing keeps its own tier. Without it the agent cannot log in to any
+    # portal whose sign-in button is a submit control, which is every portal: the
+    # rule exists to stop an unbaselined RECORD being posted, and an authentication
+    # form posts no record. The exemption is declared per step, is off by default,
+    # and does not touch the grant cap below, so a tier-1 grant still refuses it.
+    exempt = element.is_submit and ctx.step.fires_form and ctx.step.tier < 3
+    effective_tier = ctx.step.tier if exempt else (
+        3 if element.is_submit else ctx.step.tier)
 
     if effective_tier > ctx.grant.max_tier:
         raise GuardRefusal(
@@ -39,7 +49,7 @@ def check(action: Action, ctx: ActionContext) -> None:
             + str(ctx.grant.max_tier) + ": " + ctx.grant.reason
         )
 
-    if element.is_submit and ctx.step.tier < 3:
+    if element.is_submit and ctx.step.tier < 3 and not exempt:
         raise GuardRefusal(
             "element " + repr(element.name) + " is a submit control, but step "
             + repr(ctx.step.step_key) + " is tier " + str(ctx.step.tier)

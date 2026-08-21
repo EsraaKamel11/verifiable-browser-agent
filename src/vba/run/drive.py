@@ -4,6 +4,7 @@ from typing import Any, Iterator
 
 from vba.act.actions import Action, ActionContext
 from vba.act.choke import execute
+from vba.guard.tiers import GuardRefusal
 from vba.memory.capture import confidence, slice_capture, to_stored_actions
 from vba.memory.store import LearnedFix, StoredAction
 from vba.memory.templating import bind
@@ -11,7 +12,23 @@ from vba.oracle.delta import Baseline, Outcome, PageVerdict, adjudicate
 from vba.perceive.snapshot import snapshot
 from vba.verify.page import page_verify
 
+from . import chaos
 from .outcomes import StepOutcome
+
+
+class RefusedReplay(GuardRefusal):
+    """A stored action the guard refused, carrying what was refused. Ruling R22(a).
+
+    A GuardRefusal names only its reason, and run_step is where the refusal has to
+    be recorded and degraded, so the memory path re-raises with the action and the
+    target attached. It stays a GuardRefusal, so nothing that already catches one
+    changes behaviour.
+    """
+
+    def __init__(self, refusal: GuardRefusal, kind: str, target: str):
+        super().__init__(refusal.reason)
+        self.kind = kind
+        self.target = target
 
 
 class CtxHolder:
@@ -168,8 +185,12 @@ async def drive(driver, step, ctx, deps) -> PageVerdict:
             action = Action(kind=stored.kind, target_id=target.target_id,
                             value=stored.value, step_key=step.step_key,
                             epoch=obs.epoch)
-            await execute(action, live_ctx, deps.page, deps.audit, deps.vault,
-                          deps.scrubber)
+            try:
+                await execute(action, live_ctx, deps.page, deps.audit, deps.vault,
+                              deps.scrubber)
+            except GuardRefusal as refusal:
+                raise RefusedReplay(refusal, action.kind,
+                                    target.element_id or target.name) from refusal
             deps.ctx_holder.record(action)
             await deps.settle()
     else:
@@ -258,8 +279,14 @@ async def run_step(step, contract, bindings, attempts, deps) -> StepOutcome:
     # snapshot below uses contract.name. They must agree or the entry fingerprint
     # matches nothing and capture slices an empty suffix forever.
     deps.contract_name = contract.name
+    # The entity, so the resolution prompt can name it. Set every step because a
+    # single Deps drives one entity and the value never changes within it, but a
+    # value left unset would silently render a task with no parameters at all.
+    deps.bindings = dict(bindings)
     deps.attach_response_listener()                      # ruling R13, once per page
     deps.ctx_holder.bind(deps, step)
+    # Ruling R24, evaluation tooling: inert unless VBA_CHAOS names this step.
+    await chaos.fire(chaos.PORTAL_DOWN_BEFORE, step.step_key)
     # One trace per attempt. An earlier attempt's refused actions are not part of
     # this attempt's fix, and a bounce that leaves the fingerprint unchanged would
     # otherwise carry them into the slice.
@@ -268,8 +295,14 @@ async def run_step(step, contract, bindings, attempts, deps) -> StepOutcome:
     epoch = deps.next_epoch()
     obs = await snapshot(deps.page, epoch, contract.name, step.step_key)
 
+    # Ruling R23. On a retry the memory lookup is skipped entirely. This loop only
+    # runs again because the previous attempt failed, and replaying the identical
+    # fix that just failed is the blinder spec 6.3 warns about: the stated refusal
+    # can only reach a session, so a retry must resolve cold to make any use of it.
+    # The fix is not superseded here; a later cold CONFIRMED supersedes it through
+    # the capture path, which is where the evidence for that lives.
     fix = deps.store.lookup(contract.site, contract.name, step.step_key) \
-        if deps.memory_enabled else None
+        if deps.memory_enabled and attempts == 0 else None
     if fix and fix.page_fingerprint != obs.fingerprint:
         deps.audit.stale_fix_detected(fix.fix_id, fix.page_fingerprint, obs.fingerprint)
         fix = None
@@ -278,6 +311,11 @@ async def run_step(step, contract, bindings, attempts, deps) -> StepOutcome:
     if step.satisfied_when:
         reading = await deps.oracle.read(bindings["npi"])
         baseline = Baseline(reading=reading, epoch=epoch)
+        # Ruling R24. Fired here and not a line earlier: spec 7.3's case is a record
+        # store that was readable when the act was authorized and unreadable when
+        # the act needed confirming, which is the only ordering that produces a
+        # genuinely unconfirmable submission.
+        await chaos.fire(chaos.BLACKHOLE_AFTER_BASELINE, step.step_key)
         # Spec 5.3 and 5.5. Both of these are decided BEFORE acting, because both
         # answers are the same after acting and one of them is irreversible: an
         # already-enrolled provider must never be submitted again, and an act
@@ -313,7 +351,23 @@ async def run_step(step, contract, bindings, attempts, deps) -> StepOutcome:
         driver = _SessionDriver(step, obs, ctx, deps, negatives,
                                 deps.failure_context if attempts > 0 else None)
 
-    page = await drive(driver, step, ctx, deps)
+    try:
+        page = await drive(driver, step, ctx, deps)
+    except GuardRefusal as refusal:
+        # Ruling R22(a). A refused replay is a MISS, never a crash: the guard
+        # refusing a stored action is exactly the drift the memory path exists to
+        # survive, and letting it escape run_entity would take the rest of the
+        # batch down with it. The attempt is recorded, which CLAUDE.md already
+        # promises, and MECHANICAL routes the step into a cold resolution.
+        deps.audit.action_refused(step.step_key,
+                                  kind=getattr(refusal, "kind", "unknown"),
+                                  target=getattr(refusal, "target", ""),
+                                  reason=refusal.reason, source=source)
+        page = PageVerdict.MECHANICAL
+        # No post-action observation exists. Leaving the previous step's would let
+        # a confirmation number from an earlier page be read as this step's.
+        deps.last_observation = None
+
     final = deps.last_observation
 
     # Overwritten on every step, including back to None. A refusal or a

@@ -32,6 +32,13 @@ class Step(BaseModel):
     step_key: str
     intent: str
     tier: int = Field(ge=1, le=3)
+    # The explicit exemption spec 4.3 calls for. The shaping rule classifies any
+    # submit-type control as tier 3, because firing a form is how an unbaselined
+    # record gets posted. An authentication form posts no record, and the contract
+    # is the only artifact that knows which forms do. Declaring it here keeps the
+    # exemption per step, auditable, and off by default: a step that does not
+    # declare it still cannot fire any form.
+    fires_form: bool = False
     credentials: CredentialRef | None = None
     preconditions: list[str] = Field(default_factory=list)
     satisfied_when: str | None = None

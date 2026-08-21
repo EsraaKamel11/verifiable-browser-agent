@@ -97,6 +97,43 @@ def test_a_tier_1_read_is_permitted():
     check(a, _ctx(TIER1))  # does not raise
 
 
+# --- The contract-declared form exemption (spec 4.3) ---
+
+LOGIN = Step(step_key="portal.login", intent="sign in", tier=2, fires_form=True)
+SELECT = Step(step_key="enrollment.select_payer", intent="pick the payer", tier=2)
+
+
+def test_a_declared_form_firing_step_may_fire_its_own_form_without_a_baseline():
+    """Every portal signs in through a submit control, so without an explicit
+    exemption the shaping rule refuses the login button and no contract that
+    requires authentication can run at all. The exemption is declared in the
+    contract, per step, and it keeps the step at its own tier so the tier-3
+    baseline requirement does not apply to an act that posts no record."""
+    a = Action(kind="click", target_id=1, value=None,
+               step_key="portal.login", epoch=7)
+    check(a, _ctx(LOGIN, baseline=None))  # does not raise
+
+
+def test_an_undeclared_tier_2_step_still_cannot_fire_a_form():
+    """The control, and the case the rule exists for: the payer-selection step
+    runs on the page that carries the real enrollment submit button, and it must
+    not be able to post an unbaselined record."""
+    a = Action(kind="click", target_id=1, value=None,
+               step_key="enrollment.select_payer", epoch=7)
+    with pytest.raises(GuardRefusal, match="submit"):
+        check(a, _ctx(SELECT))
+
+
+def test_a_declared_form_firing_step_is_still_capped_by_the_grant():
+    """Spec 4.2 outranks the exemption: a tier-1 grant refuses a tier-2 act
+    whether or not the contract declared the step form-firing."""
+    a = Action(kind="click", target_id=1, value=None,
+               step_key="portal.login", epoch=7)
+    tier1_only = Grant(max_tier=1, reason="no oracle binding")
+    with pytest.raises(GuardRefusal, match="grant"):
+        check(a, _ctx(LOGIN, grant=tier1_only))
+
+
 # --- Choke-point smoke tests ---
 
 

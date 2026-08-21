@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -20,6 +20,11 @@ class Deps:
     ctx_holder: Any
     grant: Any
     contract_name: str = ""
+    # The entity this run is about, set by run_step from the invocation's bindings.
+    # It is carried here rather than added to run_resolution's signature so the
+    # canonical interface (ruling R18) is unchanged; the resolution prompt reads it
+    # so a session is told which provider and which payer it is working on.
+    bindings: dict = field(default_factory=dict)
     memory_enabled: bool = True
     memory_writes_enabled: bool = True
     last_http_status: int | None = None

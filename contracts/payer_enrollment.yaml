@@ -13,17 +13,32 @@ identity:
   resolve_ambiguity_by: oracle      # never by retry
 
 steps:
+  # Every step below carries an on-page postcondition. A step that declares none
+  # passes whenever the page does not actively refuse it, so a session that filled
+  # a form and never submitted it reported success and the run walked on against
+  # the wrong page. page_verify steers the loop (spec 5.2) and it can only steer
+  # on evidence the contract names.
   - step_key: portal.login
     intent: "sign in with the team credentials"
     tier: 2
+    fires_form: true                # authentication posts no record; see spec 4.3
     credentials: {ref: portal, fields: [email, password]}
+    postconditions:
+      - text_present: "Two-step verification"
   - step_key: portal.verify_2fa
-    intent: "enter the authenticator code and confirm the not-a-robot checkbox"
+    # "confirm the not-a-robot checkbox" read as the whole of the step, so two live
+    # runs entered the code, ticked the box and stopped without ever verifying.
+    intent: "enter the authenticator code, tick the not-a-robot checkbox, and confirm the verification form"
     tier: 2
+    fires_form: true                # authentication posts no record; see spec 4.3
     credentials: {ref: portal, fields: [otp]}
+    postconditions:
+      - text_present: "Providers pending enrollment"
   - step_key: provider.open
     intent: "open the record for provider {npi}"
     tier: 1
+    postconditions:
+      - text_present: "Provider record"
   - step_key: enrollment.select_payer
     intent: "select the payer named in the contract"
     tier: 2

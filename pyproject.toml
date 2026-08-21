@@ -20,6 +20,10 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# A bare `pytest` runs the keyless tier only. The world tier needs a server and the
+# evals tier spends money on a live model, so neither may be reachable by accident;
+# ask for them by marker. A -m on the command line replaces this one.
+addopts = "-m 'not world and not evals'"
 markers = [
     "world: needs the target world running on 127.0.0.1:8799",
     "evals: needs a model API key and costs money",

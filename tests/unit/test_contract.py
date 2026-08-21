@@ -12,6 +12,16 @@ def test_loads_the_shipped_contract():
     assert [s.step_key for s in c.steps][-1] == "enrollment.submit"
 
 
+def test_only_the_authentication_steps_are_exempted_from_the_shaping_rule():
+    """Spec 4.3. The exemption is what lets the agent sign in at all, and it is
+    also the one place where a lower-tier step is permitted to fire a form. It
+    must not leak onto the steps that run on the page carrying the enrollment
+    submit button, so the shipped contract is pinned here rather than trusted."""
+    c = load_contract("contracts/payer_enrollment.yaml")
+    exempt = [s.step_key for s in c.steps if s.fires_form]
+    assert exempt == ["portal.login", "portal.verify_2fa"]
+
+
 def test_a_tier_3_step_must_declare_satisfied_when():
     """Spec 5.1: the tier-3 predicate's baseline requirement cannot be satisfied
     by a step that never reads one, so the schema enforces the coupling."""

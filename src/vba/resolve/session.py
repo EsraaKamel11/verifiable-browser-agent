@@ -49,8 +49,13 @@ async def run_resolution(step, obs, ctx, negatives, deps, failure_context=None):
         max_budget_usd=MAX_BUDGET_USD,
         effort="medium",
     )
+    # Both halves are scrubbed. The observation always was; the task text carries
+    # world-authored refusal excerpts and the run's own bindings, so spec 4.4's
+    # "every payload that leaves the process" applies to it too.
     prompt = "\n\n".join([
-        render_task(step, negatives, failure_context),
+        deps.scrubber.clean(
+            render_task(step, negatives, failure_context,
+                        getattr(deps, "bindings", None))),
         render_observation(obs, deps.scrubber),
     ])
     async for message in query(prompt=prompt, options=options):

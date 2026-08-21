@@ -957,3 +957,148 @@ async def test_a_step_without_satisfied_when_is_judged_on_the_page_alone(
     assert outcome.outcome is Outcome.CONFIRMED
     assert outcome.verif_strength == "on_page"
     assert oracle.reads == 0, "a step with no satisfied_when must not read the oracle"
+
+
+# --- Ruling R22(a): a refused replay is a miss, never a crash ---
+
+
+def _promoted(store, page_fingerprint=None, actions=None):
+    fix = LearnedFix.new(site=CONTRACT.site, contract=CONTRACT.name,
+                         step_key=STEP3.step_key, intent=STEP3.intent,
+                         page_fingerprint=page_fingerprint or ENTRY_OBS.fingerprint,
+                         actions=list(actions or FIX_ACTIONS),
+                         match_mode="exact_identity", action_tier=3,
+                         provenance="eval_promoted")
+    store.write_candidate(fix)
+    return fix
+
+
+async def test_a_refused_replay_is_recorded_and_degrades_to_a_miss(
+        monkeypatch, tmp_path):
+    """Ruling R22(a). The guard refusing a stored action is precisely the drift the
+    memory path exists to survive, so it must not escape run_entity and take the
+    rest of the batch with it. It is recorded, because CLAUDE.md says the attempt
+    is recorded, and it becomes NOT_ACTED so the step resolves again.
+
+    The refusal here is the real one a stale fix produces: a tier-3 replay whose
+    baseline belongs to another step. It is forced by clearing the baseline the
+    guard demands, which is what a fix replayed under a step that read none would
+    do.
+    """
+    store = FixStore(tmp_path / "memory.db")
+    fix = _promoted(store)
+    _install_snapshot(monkeypatch, [ENTRY_OBS, ENTRY_OBS, ENTRY_OBS, ENTRY_OBS])
+
+    async def never(*a, **kw):
+        raise AssertionError("attempt 0 must replay memory, not resolve")
+
+    monkeypatch.setattr("vba.resolve.session.run_resolution", never)
+    page, audit = FakePage(), _audit(tmp_path)
+    deps = _deps(page, audit, store=store,
+                 oracle=FakeOracle([ABSENT, ABSENT]))
+
+    # A baseline the guard will reject: the reading is present so the step is not
+    # short-circuited, but drive() re-stamps a baseline of None onto nothing.
+    monkeypatch.setattr(drive_mod, "_restamp", lambda baseline, epoch: None)
+
+    outcome = await run_step(STEP3, CONTRACT, BINDINGS, 0, deps)
+
+    assert outcome.outcome is Outcome.NOT_ACTED, "a refused replay is a miss"
+    refusals = [r for r in audit.records() if r["event"] == "action_refused"]
+    assert len(refusals) == 1
+    assert refusals[0]["kind"] == "click"
+    assert refusals[0]["target"] == "reviewed"
+    assert "baseline" in refusals[0]["reason"]
+    assert refusals[0]["source"] == "memory:" + fix.fix_id, \
+        "the record must say the refused action came from a replay"
+    assert page.calls == [], "the guard is a partition; nothing reached the browser"
+
+
+async def test_a_refused_replay_does_not_inherit_an_earlier_pages_confirmation(
+        monkeypatch, tmp_path):
+    """Nothing was submitted, so nothing may be read off a page from before. A
+    stale confirmation number is one of the three agreements CONFIRMED needs."""
+    store = FixStore(tmp_path / "memory.db")
+    _promoted(store)
+    _install_snapshot(monkeypatch, [ENTRY_OBS, ENTRY_OBS, ENTRY_OBS, ENTRY_OBS])
+    monkeypatch.setattr("vba.resolve.session.run_resolution",
+                        _acting_session(()))
+    page, audit = FakePage(), _audit(tmp_path)
+    deps = _deps(page, audit, store=store, oracle=FakeOracle([ABSENT, ABSENT]))
+    deps.last_observation = DONE_OBS          # an earlier step's success page
+    monkeypatch.setattr(drive_mod, "_restamp", lambda baseline, epoch: None)
+
+    await run_step(STEP3, CONTRACT, BINDINGS, 0, deps)
+
+    assert deps.page_confirmation() is None
+
+
+# --- Ruling R23: a retry resolves cold ---
+
+
+async def test_a_retry_resolves_cold_even_when_a_promoted_fix_still_resolves(
+        monkeypatch, tmp_path):
+    """Ruling R23, and spec 6.3's blinder.
+
+    The attempt loop only runs again because the last attempt failed. The stored
+    fix still resolves against the page, so nothing stops it being replayed a
+    second time, and it would fail identically: the refusal text can only be acted
+    on by a session. Attempt 1 therefore ignores memory entirely.
+    """
+    store = FixStore(tmp_path / "memory.db")
+    fix = _promoted(store)
+    assert fix.still_resolves(ENTRY_OBS, BINDINGS), "the fix must still resolve, " \
+        "or this test proves nothing about skipping it"
+
+    spy = {}
+    _install_snapshot(monkeypatch, [ENTRY_OBS, ENTRY_OBS, DONE_OBS, DONE_OBS])
+    monkeypatch.setattr(
+        "vba.resolve.session.run_resolution",
+        _acting_session((("click", "reviewed"),
+                         ("submit", "confirm-and-submit")), spy))
+    page, audit = FakePage(), _audit(tmp_path)
+    deps = _deps(page, audit, store=store, oracle=FakeOracle([ABSENT, POSTED]))
+    deps.failure_context = "Please confirm you have reviewed"
+
+    outcome = await run_step(STEP3, CONTRACT, BINDINGS, 1, deps)
+
+    assert outcome.source == "cold"
+    assert spy["calls"] == 1, "attempt 1 must reach a resolution session"
+    assert spy["failure_context"] == "Please confirm you have reviewed"
+
+
+async def test_the_first_attempt_still_prefers_memory(monkeypatch, tmp_path):
+    """The control for R23: skipping the lookup on attempt 0 too would turn memory
+    off entirely and the reuse demonstration would silently become the cold one."""
+    store = FixStore(tmp_path / "memory.db")
+    fix = _promoted(store)
+    _install_snapshot(monkeypatch, [ENTRY_OBS, ENTRY_OBS, ENTRY_OBS, DONE_OBS])
+
+    async def never(*a, **kw):
+        raise AssertionError("attempt 0 must replay memory, not resolve")
+
+    monkeypatch.setattr("vba.resolve.session.run_resolution", never)
+    page, audit = FakePage(), _audit(tmp_path)
+    deps = _deps(page, audit, store=store, oracle=FakeOracle([ABSENT, POSTED]))
+
+    outcome = await run_step(STEP3, CONTRACT, BINDINGS, 0, deps)
+
+    assert outcome.source == "memory:" + fix.fix_id
+
+
+# --- The entity reaches the resolution prompt ---
+
+
+async def test_the_bindings_are_published_for_the_resolution_prompt(
+        monkeypatch, tmp_path):
+    """The contract's intents carry parameter placeholders and the payer arrives
+    only as a binding, so a session that is not told them is guessing which
+    provider and which payer it is working on."""
+    page, audit, deps = _cold_run(
+        monkeypatch, tmp_path,
+        plan=[ENTRY_OBS, ENTRY_OBS, DONE_OBS, DONE_OBS],
+        readings=[ABSENT, POSTED])
+
+    await run_step(STEP3, CONTRACT, BINDINGS, 0, deps)
+
+    assert deps.bindings == BINDINGS
