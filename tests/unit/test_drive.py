@@ -195,6 +195,104 @@ async def test_the_memory_path_stamps_the_fix_id_onto_every_audited_action(
     assert sources == ["memory:" + FIX_ID, "memory:" + FIX_ID]
 
 
+async def test_an_outage_mid_replay_is_infrastructural_and_never_resolves(
+        monkeypatch, tmp_path):
+    """Spec 5.2. A missing target and a portal that stopped answering look
+    identical to _find, and collapsing them is how an outage becomes a resubmit.
+    Only page_verify can tell them apart, so a miss must still be classified
+    rather than short-circuited into MECHANICAL."""
+    gone = Observation(url="http://portal/enroll", epoch=0, elements=[],
+                       text="Service unavailable", fingerprint="fp-error")
+    _install_snapshot(monkeypatch, [ENTRY_OBS, gone, gone])
+    page, audit = FakePage(), _audit(tmp_path)
+    deps = _deps(page, audit)
+    deps.last_http_status = 503
+    entry = replace(ENTRY_OBS, epoch=deps.next_epoch())
+    ctx = ActionContext(step=STEP3, grant=FULL, observation=entry,
+                        baseline=Baseline(reading=OracleReading(True, False, 0, None, {}),
+                                          epoch=entry.epoch),
+                        source="memory:" + FIX_ID)
+
+    verdict = await drive(_MemoryDriver(actions=list(replay(FakeFix(), {}))),
+                          STEP3, ctx, deps)
+
+    assert verdict is PageVerdict.INFRASTRUCTURAL
+    assert page.calls == [("click", "#reviewed")], "action 1 landed, action 2 did not"
+    assert deps.last_observation is not None, \
+        "an abandoned replay must still leave the observation run_step reads"
+    assert deps.last_observation.text == "Service unavailable"
+
+
+async def test_a_missing_target_with_a_healthy_page_is_still_a_mechanical_miss(
+        monkeypatch, tmp_path):
+    """The true-miss case stays pinned: the portal answered, the element is gone."""
+    gone = Observation(url="http://portal/enroll", epoch=0, elements=[],
+                       text="Enrollment form", fingerprint="fp-other")
+    _install_snapshot(monkeypatch, [ENTRY_OBS, gone, gone])
+    page, audit = FakePage(), _audit(tmp_path)
+    deps = _deps(page, audit)
+    deps.last_http_status = 200
+    entry = replace(ENTRY_OBS, epoch=deps.next_epoch())
+    ctx = ActionContext(step=STEP3, grant=FULL, observation=entry,
+                        baseline=Baseline(reading=OracleReading(True, False, 0, None, {}),
+                                          epoch=entry.epoch),
+                        source="memory:" + FIX_ID)
+
+    verdict = await drive(_MemoryDriver(actions=list(replay(FakeFix(), {}))),
+                          STEP3, ctx, deps)
+
+    assert verdict is PageVerdict.MECHANICAL
+
+
+async def test_an_abandoned_replay_is_never_reported_as_a_pass(monkeypatch, tmp_path):
+    """Spec 6.6: a drift mismatch degrades to a MISS. A miss that advances the
+    step is not a miss.
+
+    Four of the five steps in the shipped contract declare no postconditions at
+    all, and page_verify with nothing to check answers PASSED. So classifying an
+    abandoned replay purely by the page would report a stale fix on
+    provider.open as CONFIRMED and walk on to the next step against whatever page
+    happened to be open, instead of healing. The page steers; it never decides
+    that an act it never saw succeeded.
+    """
+    step1 = Step(step_key="provider.open", intent="open the record", tier=1)
+    gone = Observation(url="http://portal/index", epoch=0, elements=[],
+                       text="Provider index", fingerprint="fp-other")
+    _install_snapshot(monkeypatch, [gone, gone])
+    page, audit = FakePage(), _audit(tmp_path)
+    deps = _deps(page, audit)
+    entry = replace(ENTRY_OBS, epoch=deps.next_epoch())
+    ctx = ActionContext(step=step1, grant=FULL, observation=entry, baseline=None,
+                        source="memory:" + FIX_ID)
+
+    verdict = await drive(_MemoryDriver(actions=list(replay(FakeFix(), {}))),
+                          step1, ctx, deps)
+
+    assert verdict is PageVerdict.MECHANICAL
+    assert page.calls == []
+
+
+async def test_an_abandoned_replay_still_yields_to_a_stated_refusal(
+        monkeypatch, tmp_path):
+    """A refusal is more specific than a miss and carries its reason forward, so
+    it must survive the downgrade that only ever applies to PASSED."""
+    bounced = Observation(url="http://portal/enroll", epoch=0, elements=[],
+                          text=REFUSAL_TEXT, fingerprint="fp-other")
+    _install_snapshot(monkeypatch, [bounced, bounced])
+    page, audit = FakePage(), _audit(tmp_path)
+    deps = _deps(page, audit)
+    entry = replace(ENTRY_OBS, epoch=deps.next_epoch())
+    ctx = ActionContext(step=STEP3, grant=FULL, observation=entry,
+                        baseline=Baseline(reading=OracleReading(True, False, 0, None, {}),
+                                          epoch=entry.epoch),
+                        source="memory:" + FIX_ID)
+
+    verdict = await drive(_MemoryDriver(actions=list(replay(FakeFix(), {}))),
+                          STEP3, ctx, deps)
+
+    assert verdict is PageVerdict.REJECTED
+
+
 async def test_a_fix_whose_target_is_gone_degrades_to_a_miss_and_never_forces(
         monkeypatch, tmp_path):
     """Spec 6.6: a stale fix is never forced. The page here has neither stored
@@ -561,6 +659,63 @@ async def test_the_next_attempt_is_told_why_the_last_one_was_refused(
     assert spy["failure_context"] == "Please confirm you have reviewed"
     assert [n.failure_mode for n in spy["negatives"]] == [
         "submitting without ticking the review box"]
+
+
+async def test_the_same_refusal_twice_leaves_exactly_one_negative_entry(
+        monkeypatch, tmp_path):
+    """Ruling R20. Every current negative is injected into every later resolution
+    for this step, so duplicates do not merely waste rows: they crowd the prompt
+    with the same warning repeated."""
+    bounced = replace(ENTRY_OBS, text=REFUSAL_TEXT)
+    page, audit, deps = _cold_run(
+        monkeypatch, tmp_path,
+        plan=[ENTRY_OBS, bounced, bounced, ENTRY_OBS, bounced, bounced],
+        readings=[ABSENT],
+        steps_to_take=(("submit", "confirm-and-submit"),))
+
+    first = await run_step(STEP3, CONTRACT, BINDINGS, 0, deps)
+    second = await run_step(STEP3, CONTRACT, BINDINGS, 1, deps)
+
+    assert first.outcome is Outcome.REJECTED and second.outcome is Outcome.REJECTED
+    negatives = deps.store.negatives_for(CONTRACT.site, CONTRACT.name, STEP3.step_key)
+    assert [n.failure_mode for n in negatives] == ["Please confirm you have reviewed"]
+    assert len([r for r in audit.records() if r["event"] == "memory_write"]) == 1
+
+
+async def test_a_negative_entry_is_superseded_once_the_step_confirms(
+        monkeypatch, tmp_path):
+    """Spec 6.3, ruling R20: a portal fix must not leave a permanent blinder.
+
+    Without this, the refusal learned on layout B is injected into every future
+    resolution of this step forever, including on layouts where the approach it
+    warns against is the correct one.
+    """
+    bounced = replace(ENTRY_OBS, text=REFUSAL_TEXT)
+
+    def plan_for(failure_context):
+        if failure_context is None:
+            return (("submit", "confirm-and-submit"),)
+        return (("click", "reviewed"), ("submit", "confirm-and-submit"))
+
+    _install_snapshot(monkeypatch, [ENTRY_OBS, bounced, bounced,
+                                    ENTRY_OBS, ENTRY_OBS, DONE_OBS, DONE_OBS])
+    monkeypatch.setattr("vba.resolve.session.run_resolution",
+                        _acting_session(plan_for))
+    page, audit = FakePage(), _audit(tmp_path)
+    deps = _deps(page, audit, store=FixStore(tmp_path / "memory.db"),
+                 oracle=FakeOracle([ABSENT, ABSENT, ABSENT, POSTED]))
+
+    result = await run_entity(CONTRACT, BINDINGS, deps)
+
+    assert result.terminal is Outcome.CONFIRMED
+    assert deps.store.negatives_for(CONTRACT.site, CONTRACT.name,
+                                    STEP3.step_key) == []
+    healed = deps.store.lookup(CONTRACT.site, CONTRACT.name, STEP3.step_key)
+    retired = [r for r in audit.records()
+               if r["event"] == "memory_superseded" and r["reason"] == "approach succeeded"]
+    assert len(retired) == 1
+    assert retired[0]["new_fix_id"] == healed.fix_id, \
+        "the supersede names the fix that replaced the failed approach"
 
 
 async def test_a_confirmed_attempt_clears_the_previous_refusal(monkeypatch, tmp_path):

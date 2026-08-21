@@ -145,13 +145,21 @@ async def drive(driver, step, ctx, deps) -> PageVerdict:
     for it. Either way, every action crosses the choke point individually and the
     page is re-perceived between actions.
     """
+    abandoned = False
     if driver.kind == "memory":
         for stored in driver.actions:
             obs = await snapshot(deps.page, deps.next_epoch(), deps.contract_name,
                                  step.step_key)
             target = _find(obs, stored)
             if target is None:
-                return PageVerdict.MECHANICAL          # degrade to a miss, never force
+                # Degrade to a miss, never force (spec 6.6). But the classification
+                # is page_verify's, not this loop's: a missing target and a portal
+                # that stopped answering are indistinguishable here, and returning
+                # MECHANICAL outright would send a 5xx outage into a resolution
+                # session, which spec 5.2 forbids by name. Break, and let the
+                # final snapshot below decide.
+                abandoned = True
+                break
             live_ctx = ActionContext(step=ctx.step, grant=ctx.grant, observation=obs,
                                      baseline=_restamp(ctx.baseline, obs.epoch),
                                      source=ctx.source)
@@ -170,7 +178,17 @@ async def drive(driver, step, ctx, deps) -> PageVerdict:
     final = await snapshot(deps.page, deps.next_epoch(), deps.contract_name,
                            step.step_key)
     deps.last_observation = final
-    return page_verify(step, final, deps.last_http_status)
+    verdict = page_verify(step, final, deps.last_http_status)
+    if abandoned and verdict is PageVerdict.PASSED:
+        # Spec 6.6: a drift mismatch degrades to a MISS, and a miss that advances
+        # the step is not a miss. Four of the five steps in the shipped contract
+        # declare no postconditions, and page_verify with nothing to check answers
+        # PASSED, so without this a stale fix would be reported as a success and
+        # the run would walk on instead of healing. Only PASSED is downgraded: an
+        # outage or a stated refusal is a more specific answer than a miss and
+        # both must survive.
+        return PageVerdict.MECHANICAL
+    return verdict
 
 
 def _find(obs, stored: StoredAction):
@@ -321,8 +339,10 @@ async def run_step(step, contract, bindings, attempts, deps) -> StepOutcome:
                             entity=dict(bindings),
                             page_confirmation=deps.page_confirmation())
 
-    if outcome is Outcome.CONFIRMED and source == "cold" and deps.memory_writes_enabled:
-        _capture(step, contract, bindings, entry_fingerprint, deps)
+    if outcome is Outcome.CONFIRMED and deps.memory_writes_enabled:
+        captured = (_capture(step, contract, bindings, entry_fingerprint, deps)
+                    if source == "cold" else None)
+        _retire_negatives(step, contract, captured, deps)
     _write_negative(step, contract, bindings, entry_fingerprint, outcome,
                     source, deps)
 
@@ -376,14 +396,18 @@ def _action_tier(step, stored: list) -> int:
     return 3 if any(sa.is_submit for sa in stored) else step.tier
 
 
-def _capture(step, contract, bindings, entry_fingerprint: str, deps) -> None:
-    """Spec 6.3, 6.4. Slice the trajectory, template it, gate it, write it."""
+def _capture(step, contract, bindings, entry_fingerprint: str, deps) -> str | None:
+    """Spec 6.3, 6.4. Slice the trajectory, template it, gate it, write it.
+
+    Returns the new fix's id, so the negatives this success retires can name what
+    replaced them.
+    """
     actions, pre_obs = _sliced_trace(entry_fingerprint, deps.ctx_holder)
     stored = _to_stored(actions, pre_obs, bindings)
     if not stored:
         # A zero-action fix would satisfy still_resolves vacuously and then
         # "resolve" a step by doing nothing at all.
-        return
+        return None
 
     promote = _replays_over_the_recording(stored, pre_obs, bindings)
     fix = LearnedFix.new(
@@ -406,6 +430,27 @@ def _capture(step, contract, bindings, entry_fingerprint: str, deps) -> None:
                   if superseded.page_fingerprint != entry_fingerprint
                   else "re-learned")
         deps.audit.memory_superseded(superseded.fix_id, fix.fix_id, reason)
+    return fix.fix_id
+
+
+def _retire_negatives(step, contract, new_fix_id: str | None, deps) -> None:
+    """Spec 6.3, ruling R20. An entry is superseded once the step succeeds.
+
+    Every current negative for a step is injected into every later resolution of
+    it as an approach known to fail. One that outlives the failure it describes is
+    a permanent blinder: after the portal is fixed, the agent is still told not to
+    try the thing that now works. The step confirming is the evidence, and it is
+    the same evidence promotion runs on, so no model judges this either.
+
+    The event names the fix that replaced the failed approach when one was
+    captured this run. On a warm confirmation there is no new fix to name, so the
+    id is empty and the reason carries the meaning.
+    """
+    for negative in deps.store.negatives_for(contract.site, contract.name,
+                                             step.step_key):
+        deps.store.supersede(negative.fix_id)
+        deps.audit.memory_superseded(negative.fix_id, new_fix_id or "",
+                                     "approach succeeded")
 
 
 def _write_negative(step, contract, bindings, entry_fingerprint: str,
@@ -416,6 +461,13 @@ def _write_negative(step, contract, bindings, entry_fingerprint: str,
     if outcome is not Outcome.REJECTED or source != "cold":
         return
     if not deps.memory_writes_enabled:
+        return
+    # Ruling R20. Negatives are read back as a list of approaches known to fail,
+    # so a repeated refusal must not repeat the same warning in every later
+    # prompt. There is no unique index on negative polarity, by design (a step may
+    # carry several distinct current negatives), so the dedupe is done here.
+    current = deps.store.negatives_for(contract.site, contract.name, step.step_key)
+    if any(n.failure_mode == deps.failure_context for n in current):
         return
     actions, pre_obs = _sliced_trace(entry_fingerprint, deps.ctx_holder)
     stored = _to_stored(actions, pre_obs, bindings)
