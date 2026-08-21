@@ -22,6 +22,7 @@ in the specific way real portals lie.
    renamed, moved, and gated behind a new review checkbox. The agent resolves the
    new page and completes the enrollment with no code change. The evidence is the
    agent's own commit hash, recorded in the audit before and after and identical.
+   This one does not always converge, and the stated limits below say when and why.
 3. **Memory reuse.** The fix learned during the heal is replayed on a different
    provider without a model call for that step. The audit records the fix id
    against every action it produced, so a warm run is distinguishable from a cold
@@ -216,6 +217,16 @@ them fail. Every test in the repository was green throughout.
   ticked or which option a dropdown has selected is not shown to the model, so a
   retry cannot tell what a previous attempt already did and may undo it. This was
   observed live before the intermediate steps were given postconditions.
+- **The self-heal only converges when the first attempt guesses right.** Observed
+  live, and reported rather than repaired. When a first attempt is bounced to a
+  refusal page, the retry re-enters the step on that page, where the contract's own
+  postcondition text is present, so the step reports a refusal at entry whatever
+  the attempt does. The way out is to navigate back to the form, and nothing the
+  agent is told says so: the refusal text it is handed describes the form it is no
+  longer looking at. The run then escalates honestly and the record store confirms
+  nothing was filed, so no false claim is made, but the heal itself fails. Two
+  fixes are obvious and neither is built: carry where the agent now is into the
+  refusal context, or return to the step's entry page before resolving again.
 - **A fix cannot be captured from a trajectory that starts on a refusal page.**
   Capture slices the action suffix that begins at the step's entry state, so an
   attempt that starts on a bounce page, navigates back and then succeeds captures

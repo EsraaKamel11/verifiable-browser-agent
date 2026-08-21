@@ -201,6 +201,26 @@ login page and reported nothing wrong until the submit step ran out of attempts.
 Every step now carries on-page evidence, and the step whose wording invited the
 stop was reworded to name the confirmation it needs.
 
+**The rubric found a fourth, and it is reported unfixed.** The self-heal case
+passed on its first repeat and failed on its second. The first attempt submitted
+without ticking the layout's new review checkbox, the portal bounced it to a
+"Review required" page, and everything about that was correct: the outcome was a
+refusal, a negative entry was written naming the exact approach that failed, and
+the refusal text was handed to the next attempt.
+
+Then it could not get back. The retry re-enters the step on the bounce page, and
+the contract's own postcondition text is present on that page, so the step reports
+a refusal at entry whatever the attempt does. The only way out is to navigate back
+to the form, and nothing the agent is told says that. The refusal text it was given
+describes the form it is no longer looking at. Three attempts later the run
+escalated, and the payer's records correctly showed that nothing had been filed.
+
+No false claim was made and nothing was filed twice, which is the property that
+matters most. But the heal only converges when the first attempt guesses right, and
+that is a weaker claim than "resolves the new page". It is reported here rather than
+repaired, because a found defect is worth more than a repaired one on the last day
+of a build whose entire subject is evidence.
+
 A second run, with the postconditions in place but the wording unchanged, showed
 the retry problem underneath it: the model re-entered the code and clicked the
 checkbox a second time, un-ticking what the first attempt had ticked, because the
