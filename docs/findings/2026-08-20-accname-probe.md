@@ -70,5 +70,5 @@ placeholder.
 .venv/Scripts/python tools/probe_accname.py > probe_output.json   # shell 2
 ```
 
-Inspect the `textbox` node with `"name": "NPI "` under
-`children[?].children` for the provider-record page body.
+Inspect the `textbox` node with `"name": "NPI "`; in the current layout it is
+a direct child of the root `WebArea` node.
