@@ -47,7 +47,7 @@ the consistency pass had not:
   resolution, so every audit record would have said "cold" and the memory-reuse
   demonstration would have had no evidence to point at. Provenance now travels
   with the action context.
-- The field that tells page verification a server error apart from a missing
+- The field page verification uses to tell a server error apart from a missing
   control was never written by any code in the plan. A portal returning 503 would
   have been classified as a mechanical failure and routed into a resolution
   session against a dead page, which the design forbids by name. A response
@@ -159,38 +159,53 @@ asserts the invariant over a non-empty table (commit 68d0ac8).
 
 ## Task 17, the first end-to-end runs
 
-The last task is where the agent was first run end to end against the live world
-with a live model. Three defects surfaced in three runs, none of which any keyless
-or world-tier test could have reached, because all three live in the seam between
-the model, the contract, and the guard.
+The last task is where the agent was first assembled and run end to end against the
+live world with a live model. Three defects came out of it, none of which any
+keyless or world-tier test could have reached, because all three live in the seam
+between the model, the contract and the guard. Two were caught by reading before
+the first paid run; the third needed three live runs to find.
 
-**The agent could not sign in.** The guard classifies any submit-type control as
-the highest tier, which is correct for the control that files a record and wrong
-for the one that signs you in. Every portal signs in through a submit control, so
-the shaping rule refused the sign-in button and the run proceeded, with each later
-step acting on the login page. The design document anticipates the shape of the
-answer: an approved act needs an explicit exemption rather than an implicit one.
-Steps now declare form-firing in the contract. It is off by default, it applies per
-step, and the intake grant still caps it, so the step that runs on the page
-carrying the real enrollment button is still refused. Recorded in the README's
-stated limits, because it narrows a flagship guarantee.
+**The agent could not sign in.** Found by probe rather than by run: a snapshot of
+the live login page shows the sign-in button carrying submit metadata, and the
+guard classifies any submit-type control as the highest tier and refuses it below
+that tier with no baseline. That is correct for the control that files a record and
+wrong for the one that signs you in, and every portal signs in through a submit
+control. Left alone, the login step would have been refused, the step would still
+have reported success because it declared no postconditions, and every later step
+would have acted on the login page.
 
-**The resolution session was never told which entity it was working on.** The
-contract's step intents carry parameter placeholders, and the payer arrives as a
-run parameter rather than as contract text. A session was handed the literal
-placeholder and a request to "select the payer named in the contract" with nothing
-naming the payer. It would have guessed, and a wrong guess files a real record
-under the wrong identity. The bindings now reach the prompt, the intent is
-templated, and the credential references the step is authorized to fill are listed
-by name so the model does not have to guess those either.
+The design document anticipates the shape of the answer: an approved act needs an
+explicit exemption rather than an implicit one. Steps now declare form-firing in
+the contract. It is off by default, it applies per step, and the intake grant still
+caps it, so the step that runs on the page carrying the real enrollment button is
+still refused. Recorded in the README's stated limits, because it narrows a
+flagship guarantee.
 
-**Four of the five steps could not fail.** Only the submit step declared
-postconditions, so page verification answered PASSED for the other four whatever
-the page showed. A live session filled the two-factor form, ticked its checkbox,
-and stopped without submitting it, exactly as its intent literally described. The
-step reported success, and the rest of the run acted against a login page. Every
-step now carries on-page evidence, and the step whose wording invited the stop was
-reworded to name the confirmation it needs.
+**The resolution session was never told which entity it was working on.** Also
+found by reading. The contract's step intents carry parameter placeholders, and the
+payer arrives as a run parameter rather than as contract text, but nothing rendered
+either into the prompt. A session would have been handed the literal placeholder
+and a request to "select the payer named in the contract" with nothing naming the
+payer. It would have guessed, and a wrong guess files a real record under the wrong
+identity. The bindings now reach the prompt, the intent is templated, and the
+credential references the step is authorized to fill are listed by name so the
+model does not have to guess those either.
+
+**Four of the five steps could not fail.** This one only appeared in a live run.
+Only the submit step declared postconditions, so page verification answered PASSED
+for the other four whatever the page showed. In the first end-to-end run a session
+filled the two-factor form, ticked its checkbox and stopped without submitting it,
+which is exactly what its intent literally asked for. The step reported success,
+the browser stayed unauthenticated, and the remaining three steps ran against a
+login page and reported nothing wrong until the submit step ran out of attempts.
+Every step now carries on-page evidence, and the step whose wording invited the
+stop was reworded to name the confirmation it needs.
+
+A second run, with the postconditions in place but the wording unchanged, showed
+the retry problem underneath it: the model re-entered the code and clicked the
+checkbox a second time, un-ticking what the first attempt had ticked, because the
+enumerated elements the model is shown carry no state. That limitation is in the
+README rather than fixed.
 
 The third finding is the one worth sitting with. Nothing was broken. Every
 component did what it was asked. The contract asked for something slightly

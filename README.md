@@ -13,8 +13,9 @@ in the specific way real portals lie.
 
 ## The five demonstrations
 
-1. **Verification.** Two providers are filed. Both portals return "Submitted
-   successfully" with a confirmation number. One of them posted nothing. The agent
+1. **Verification.** Two providers are filed. The portal returns "Submitted
+   successfully" and a confirmation number for both. One of them posted nothing at
+   all, and the confirmation number it showed is a fabrication. The agent
    reports one enrolled and one discrepancy, escalated, and the report says which
    confirmation number does not appear in the payer's records.
 2. **Self-healing.** The portal's vendor changes the layout: the submit control is
@@ -125,8 +126,8 @@ Each run writes `runs/<run_id>/`:
   escalation.
 - `report.md`, the same run written for someone who has to act on it.
 
-One line per verification, naming the entity, the time, what the portal showed,
-what the payer's records show, and the verdict. The interesting one is the
+The report is one line per verification, naming the entity, the time, what the
+portal showed, what the payer's records show, and the verdict. The interesting one is the
 provider whose portal said "Submitted successfully": its line reports that the
 payer's records hold no enrollment for that identifier and that the confirmation
 number the portal minted does not appear in them, and it ends "Not enrolled.
@@ -170,10 +171,12 @@ solves a world built to be solved by this agent.
 
 Three things push back on that, and none of them dissolves it:
 
-1. **A temporal firewall.** A held-out set of cases is authored after the agent is
-   frozen at a commit, run once, and its failures reported unfixed. A narrative
+1. **A temporal firewall.** A held-out set of cases, authored only after the agent
+   is frozen at a commit, run once, with its failures reported unfixed. A narrative
    with a found defect in it is more credible than a perfect score, and it is the
-   only evidence that the evaluation itself works.
+   only evidence that the evaluation itself works. **This one has not run yet.** It
+   is the next piece of work, and until it does, every rubric result reported here
+   is an in-sample result and should be read as one.
 2. **External pages.** Perception and structural fingerprinting are validated
    against three pages captured from the open web that were not written for this
    project, which breaks the co-evolution loop for the layer that most needs it.
@@ -181,10 +184,11 @@ Three things push back on that, and none of them dissolves it:
    the audit file, so a reader does not have to take the summary's word for it.
 
 The review log in `docs/review-log.md` is part of this section rather than separate
-from it. It records what each review round caught, including the three defects that
-only surfaced when the agent was first run end to end against a live model, one of
-which was that the agent could not sign in at all while every test in the
-repository was green.
+from it. It records what each review round caught, including three defects found
+while assembling the agent for its first live run: that it could not sign in to any
+portal at all, that a resolution session was never told which provider or payer it
+was working on, and that four of its five steps had no evidence that could make
+them fail. Every test in the repository was green throughout.
 
 ### Stated limits
 
