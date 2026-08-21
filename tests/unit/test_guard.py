@@ -1,6 +1,7 @@
 import pytest
 
 from vba.act.actions import Action, ActionContext
+from vba.act.choke import execute
 from vba.contract.gate import Grant
 from vba.contract.schema import Step
 from vba.guard.tiers import GuardRefusal, check
@@ -92,3 +93,77 @@ def test_a_tier_1_read_is_permitted():
     a = Action(kind="click", target_id=0, value=None,
                step_key="provider.open", epoch=7)
     check(a, _ctx(TIER1))  # does not raise
+
+
+# --- Choke-point smoke tests ---
+
+
+class FakePage:
+    """Records every method call with its arguments."""
+    def __init__(self):
+        self.calls = []
+
+    async def click(self, selector):
+        self.calls.append(("click", selector))
+
+    async def fill(self, selector, value):
+        self.calls.append(("fill", selector, value))
+
+    async def select_option(self, selector, value):
+        self.calls.append(("select_option", selector, value))
+
+    async def hover(self, selector):
+        self.calls.append(("hover", selector))
+
+    async def goto(self, url):
+        self.calls.append(("goto", url))
+
+    async def evaluate(self, script, *args):
+        self.calls.append(("evaluate", script, args))
+
+
+class FakeAudit:
+    """Records action_permitted calls."""
+    def __init__(self):
+        self.calls = []
+
+    def action_permitted(self, action, element, ctx):
+        self.calls.append(("action_permitted", action, element, ctx))
+
+
+async def test_a_refused_action_produces_no_side_effect():
+    """Spec 3.1: the guard is a partition; a refusal prevents any side effect."""
+    # Tier-1 click on a submit control is refused
+    a = Action(kind="click", target_id=1, value=None, step_key="provider.open", epoch=7)
+    page = FakePage()
+    audit = FakeAudit()
+
+    with pytest.raises(GuardRefusal):
+        await execute(a, _ctx(TIER1), page, audit)
+
+    # No side effects recorded
+    assert len(page.calls) == 0, "guard refusal should prevent any page calls"
+    assert len(audit.calls) == 0, "guard refusal should prevent audit recording"
+
+
+async def test_a_permitted_action_reaches_the_browser_after_guard_passes():
+    """The guard must not refuse valid actions; permitted actions reach the browser."""
+    # Tier-1 click on a regular link is permitted
+    a = Action(kind="click", target_id=0, value=None, step_key="provider.open", epoch=7)
+    page = FakePage()
+    audit = FakeAudit()
+
+    await execute(a, _ctx(TIER1), page, audit)
+
+    # Exactly one browser call with the correct selector
+    assert len(page.calls) == 1
+    assert page.calls[0] == ("click", "a"), \
+        f"expected click('a'), got {page.calls[0]}"
+
+    # Exactly one audit call
+    assert len(audit.calls) == 1
+    name, action, element, ctx = audit.calls[0]
+    assert name == "action_permitted"
+    assert action is a
+    assert element.selector == "a"
+    assert ctx.step.tier == 1
