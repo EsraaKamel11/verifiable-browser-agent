@@ -2,6 +2,7 @@
 import json
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -106,10 +107,15 @@ class FixStore:
         with self._conn() as c:
             c.executescript(SCHEMA)
 
+    @contextmanager
     def _conn(self):
         c = sqlite3.connect(self._path)
         c.row_factory = sqlite3.Row
-        return c
+        try:
+            with c:
+                yield c
+        finally:
+            c.close()
 
     def write_candidate(self, fix: LearnedFix) -> None:
         """Spec 6.6: a conflicting current positive fix is superseded, not an error."""
