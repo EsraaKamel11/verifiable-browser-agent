@@ -40,7 +40,7 @@ The node's `name` value, quoted verbatim, is:
 NPI 
 ```
 
-(That is the four characters `N`, `P`, `I`, followed by one trailing space —
+(That is the four characters `N`, `P`, `I`, followed by one trailing space --
 the label's literal text content, nothing else. There is no trailing-space
 typo here; it is exactly what Chromium reported.)
 
