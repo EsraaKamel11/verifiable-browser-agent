@@ -22,8 +22,12 @@ def resolve_fill_value(
 ) -> str:
     """The model emitted a reference like "portal:password". Resolve it here, record
     the literal for scrubbing, and hand the value straight to the browser."""
+    import re
     raw = action.value or ""
-    if ":" not in raw:
+    # A credential reference must match the full pattern of identifier:identifier.
+    # Each part must start with a letter or underscore. Ordinary values like "Room: 204"
+    # or "14:30" pass through unchanged. Pattern: [a-zA-Z_]\w*:[a-zA-Z_]\w+
+    if not re.fullmatch(r"[a-zA-Z_]\w*:[a-zA-Z_]\w*", raw):
         return raw                       # an ordinary value, not a credential
     ref, _, field = raw.partition(":")
     creds = ctx.step.credentials
