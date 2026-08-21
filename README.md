@@ -213,12 +213,26 @@ solves a world built to be solved by this agent.
 
 Three things push back on that, and none of them dissolves it:
 
-1. **A temporal firewall.** A held-out set of cases, authored only after the agent
-   is frozen at a commit, run once, with its failures reported unfixed. A narrative
-   with a found defect in it is more credible than a perfect score, and it is the
-   only evidence that the evaluation itself works. **This one has not run yet.** It
-   is the next piece of work, and until it does, every rubric result reported here
-   is an in-sample result and should be read as one.
+1. **A temporal firewall.** Six held-out cases, authored on 2026-08-22 against the
+   agent frozen at commit `5598656`, run once each, with their failures reported
+   unfixed. **Three of the six failed.** The findings, the real output behind each
+   one, and what could not be exercised are in
+   [`docs/findings/2026-08-22-heldout-results.md`](docs/findings/2026-08-22-heldout-results.md).
+
+   | Held-out case | Result |
+   |---|---|
+   | a malformed record-store response | **fail**: a 5xx and truncated JSON are handled; a body with no count is read as a verified zero, a null count crashes the run, and an unreadable table looks like an empty one |
+   | a provider whose payer differs from the page default | pass |
+   | a layout that reuses a control id | pass: the fingerprint refuses a stored fix that still resolves perfectly |
+   | an additional silently failing provider | partial: two discrepancies in one batch are handled correctly, but the world can only plant one silent failure, so the second was simulated at the record boundary |
+   | an identifier absent from the portal | **fail**: no verdict exists for it, it is read as a click that missed, and the report for the run is an empty heading |
+   | a record page unavailable at load | **fail**: the outage page is served as HTTP 200, so it is read as a missed click and resolved against |
+
+   Every rubric number above this line is in-sample and should be read as one.
+   These six are not, and they are the only evidence here that the evaluation
+   itself finds anything. The failures are recorded rather than repaired on
+   purpose: fixing them in the same pass that found them would put the evaluation
+   back inside the loop it exists to break.
 2. **External pages.** Perception and structural fingerprinting are validated
    against three pages captured from the open web that were not written for this
    project, which breaks the co-evolution loop for the layer that most needs it.

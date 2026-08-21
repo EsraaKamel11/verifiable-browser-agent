@@ -23,8 +23,9 @@ asyncio_mode = "auto"
 # A bare `pytest` runs the keyless tier only. The world tier needs a server and the
 # evals tier spends money on a live model, so neither may be reachable by accident;
 # ask for them by marker. A -m on the command line replaces this one.
-addopts = "-m 'not world and not evals'"
+addopts = "-m 'not world and not evals and not heldout'"
 markers = [
     "world: needs the target world running on 127.0.0.1:8799",
     "evals: needs a model API key and costs money",
+    "heldout: the frozen pass (spec 7.4); authored after the freeze, run once, failures recorded rather than fixed, and excluded by default because a held-out failure is a finding rather than a broken build",
 ]
