@@ -13,11 +13,21 @@ identity:
   resolve_ambiguity_by: oracle      # never by retry
 
 steps:
-  # Every step below carries an on-page postcondition. A step that declares none
-  # passes whenever the page does not actively refuse it, so a session that filled
-  # a form and never submitted it reported success and the run walked on against
-  # the wrong page. page_verify steers the loop (spec 5.2) and it can only steer
-  # on evidence the contract names.
+  # Four of the five steps below carry an on-page postcondition. A step that
+  # declares none passes whenever the page does not actively refuse it, so a
+  # session that filled a form and never submitted it reported success and the run
+  # walked on against the wrong page. page_verify steers the loop (spec 5.2) and it
+  # can only steer on evidence the contract names.
+  #
+  # enrollment.select_payer is the exception, and deliberately so: which option a
+  # dropdown has selected is STATE, and this schema's postcondition vocabulary is
+  # text only (text_present / text_absent) over the page's own text. There is no
+  # evidence available to name, so naming some would be worse than naming none.
+  # The net is not that a wrong payer goes unnoticed. It surfaces one step later,
+  # at the submit step, where the record filed is checked against the contract's
+  # identity key [npi, payer] and a mismatch is MISFILED rather than confirmed.
+  # That check is cross-system and cannot be fooled by the page, which is a
+  # stronger guarantee than any postcondition here could have been.
   - step_key: portal.login
     intent: "sign in with the team credentials"
     tier: 2

@@ -202,12 +202,14 @@ async def drive(driver, step, ctx, deps) -> PageVerdict:
     verdict = page_verify(step, final, deps.last_http_status)
     if abandoned and verdict is PageVerdict.PASSED:
         # Spec 6.6: a drift mismatch degrades to a MISS, and a miss that advances
-        # the step is not a miss. Four of the five steps in the shipped contract
-        # declare no postconditions, and page_verify with nothing to check answers
-        # PASSED, so without this a stale fix would be reported as a success and
-        # the run would walk on instead of healing. Only PASSED is downgraded: an
-        # outage or a stated refusal is a more specific answer than a miss and
-        # both must survive.
+        # the step is not a miss. page_verify with nothing to check answers PASSED,
+        # so for any step that declares no postconditions a stale fix would
+        # otherwise be reported as a success and the run would walk on instead of
+        # healing. One of the five steps in the shipped contract is in that
+        # position today (enrollment.select_payer, whose evidence is state and not
+        # text), and any contract may add more, so this does not depend on the
+        # count. Only PASSED is downgraded: an outage or a stated refusal is a more
+        # specific answer than a miss and both must survive.
         return PageVerdict.MECHANICAL
     return verdict
 

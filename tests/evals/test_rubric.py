@@ -29,6 +29,7 @@ Run:  .venv/Scripts/python -m pytest tests/evals -v -m evals
 import json
 import os
 import pathlib
+import sys
 
 import pytest
 
@@ -38,6 +39,13 @@ from vba.memory.store import FixStore
 pytestmark = pytest.mark.evals
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+# The driver is the thing that decides which credentials a demo run injects, so the
+# canary reads its table rather than restating it. tools/ is a directory of scripts
+# rather than a package, hence the path insert.
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+import run_demo  # noqa: E402
+
 RUNS = REPO_ROOT / "runs"
 CONTRACT_PATH = REPO_ROOT / "contracts" / "payer_enrollment.yaml"
 
@@ -168,13 +176,32 @@ def test_a_stale_fix_is_detected_and_superseded(demo_run, k):
     assert any(v["outcome"] == "confirmed" for v in _verifications(records))
 
 
+def _secrets_in_force() -> dict[str, str]:
+    """The literals this run will actually inject.
+
+    The driver sets the simulation's staging fixtures with setdefault, so an
+    environment that already defines them wins. A canary that hardcodes the
+    defaults is therefore vacuous on exactly the machine that matters most: one
+    with real credentials in the environment, where it would search the audit for
+    a string that was never injected and pass without checking anything.
+
+    Resolved the same way the driver resolves them, so the assertion is always
+    about the secrets that were really in force.
+    """
+    return {name: os.environ.get(name, default)
+            for name, default in run_demo.STAGING_CREDENTIALS.items()}
+
+
 @pytest.mark.parametrize("k", range(K))
 def test_no_credential_literal_appears_in_the_audit(demo_run, k):
     """Spec 7.2: the canary. The OTP field is not a password input, so a post-fill
     observation contains it in cleartext unless the scrubber works."""
+    secrets = _secrets_in_force()
     raw = (demo_run("verification") / "audit.jsonl").read_text(encoding="utf-8")
-    assert "Staging2026!" not in raw
-    assert "246810" not in raw
+    for name in ("PORTAL_PASSWORD", "PORTAL_OTP"):
+        literal = secrets[name]
+        assert literal, name + " resolved to an empty string; the canary would pass "
+        assert literal not in raw, name + " appears in the audit in cleartext"
 
 
 def test_memory_on_costs_less_than_memory_off(demo_run):

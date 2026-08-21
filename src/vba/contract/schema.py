@@ -36,8 +36,11 @@ class Step(BaseModel):
     # submit-type control as tier 3, because firing a form is how an unbaselined
     # record gets posted. An authentication form posts no record, and the contract
     # is the only artifact that knows which forms do. Declaring it here keeps the
-    # exemption per step, auditable, and off by default: a step that does not
-    # declare it still cannot fire any form.
+    # exemption per step and off by default: a step that does not declare it still
+    # cannot fire any form. It is auditable in the literal sense that every
+    # permitted action records both this flag and whether its target was a submit
+    # control (see AuditLog.action_permitted), so a reader can tell an exempted
+    # act from an ordinary tier-2 click without consulting the contract.
     fires_form: bool = False
     credentials: CredentialRef | None = None
     preconditions: list[str] = Field(default_factory=list)

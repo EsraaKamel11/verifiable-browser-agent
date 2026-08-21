@@ -198,8 +198,14 @@ filled the two-factor form, ticked its checkbox and stopped without submitting i
 which is exactly what its intent literally asked for. The step reported success,
 the browser stayed unauthenticated, and the remaining three steps ran against a
 login page and reported nothing wrong until the submit step ran out of attempts.
-Every step now carries on-page evidence, and the step whose wording invited the
-stop was reworded to name the confirmation it needs.
+Four of the five steps now carry on-page evidence, and the step whose wording
+invited the stop was reworded to name the confirmation it needs. The fifth,
+choosing the payer, still declares nothing, and that is deliberate: which option a
+dropdown has selected is state rather than text, and a postcondition here can only
+name text. Naming the wrong evidence would be worse than naming none. A wrong payer
+is caught one step later instead, where the filed record is checked against the
+contract's identity key and a mismatch is reported as misfiled rather than
+confirmed, which is a check the page cannot fool.
 
 **The rubric found a fourth, and it is reported unfixed.** The self-heal case
 passed on its first repeat and failed on its second. The first attempt submitted

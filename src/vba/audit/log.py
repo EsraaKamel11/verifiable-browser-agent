@@ -44,10 +44,22 @@ class AuditLog:
         self._append("action", step_key=step_key, **f)
 
     def action_permitted(self, action, element, ctx) -> None:
+        """Spec 8.1. The record has to say enough to re-derive the guard's decision.
+
+        is_submit and fires_form are both here because tier alone stopped being
+        sufficient once the contract could exempt a step from the shaping rule
+        (spec 4.3). Without them a tier-2 record that fired a form is
+        indistinguishable from a tier-2 record that clicked a link, and the one
+        place the exemption is exercised would be the one place the audit is
+        silent. They are read off the element's own metadata and the step's own
+        declaration, not off anything the resolver said.
+        """
         self._append(
             "action", step_key=action.step_key, kind=action.kind,
             target=element.element_id or element.name, epoch=action.epoch,
             tier=ctx.step.tier, permitted=True,
+            is_submit=bool(getattr(element, "is_submit", False)),
+            fires_form=bool(getattr(ctx.step, "fires_form", False)),
             form_signature=ctx.observation.fingerprint,
             source=getattr(ctx, "source", "cold"),
         )

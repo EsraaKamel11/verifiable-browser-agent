@@ -124,6 +124,24 @@ def test_an_undeclared_tier_2_step_still_cannot_fire_a_form():
         check(a, _ctx(SELECT))
 
 
+def test_the_exemption_cannot_buy_a_tier_3_step_out_of_its_baseline():
+    """The safety regression. The exemption is written to apply only below tier 3,
+    so a tier-3 step that also declared it still needs a live baseline. Nothing but
+    the shape of one expression enforces that today, and an act that files a record
+    without a baseline is the single failure this whole guard exists to prevent, so
+    it is pinned here rather than left to survive the next refactor by luck."""
+    submits_and_declares = Step(step_key="enrollment.submit", intent="file it",
+                                tier=3, fires_form=True,
+                                satisfied_when="oracle.confirmed")
+    a = Action(kind="submit", target_id=1, value=None,
+               step_key="enrollment.submit", epoch=7)
+    with pytest.raises(GuardRefusal, match="baseline"):
+        check(a, _ctx(submits_and_declares, baseline=None))
+    # And the same step WITH a fresh baseline is still permitted, so the pin above
+    # is about the baseline and not about the flag breaking tier 3 outright.
+    check(a, _ctx(submits_and_declares, baseline=FakeBaseline(epoch=7)))
+
+
 def test_a_declared_form_firing_step_is_still_capped_by_the_grant():
     """Spec 4.2 outranks the exemption: a tier-1 grant refuses a tier-2 act
     whether or not the contract declared the step form-firing."""
