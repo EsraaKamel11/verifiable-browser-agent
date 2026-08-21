@@ -20,6 +20,23 @@ def allowed_tools_for(step, grant) -> list[str]:
     return ["mcp__" + SERVER_NAME + "__" + n for n in names]
 
 
+def disallowed_tools_for(step, grant) -> list[str]:
+    """Controller ruling R19, correcting this task's original enforcement choice.
+
+    allowed_tools only auto-approves a tool call; per the installed SDK's own
+    docs (types.py), the field that actually removes a tool from the model's
+    context is disallowed_tools. Spec 4.3 enforcement point 1 requires genuine
+    non-exposure, so every tool this step was not granted must be listed here.
+
+    Computed as a set-difference against allowed_tools_for, so the granted and
+    ungranted lists can never drift apart: there is exactly one source of truth
+    (the tier/grant check in allowed_tools_for) and this function only negates it.
+    """
+    all_tools = ["mcp__" + SERVER_NAME + "__" + n for n in READ_TOOLS + WRITE_TOOLS]
+    granted = set(allowed_tools_for(step, grant))
+    return [t for t in all_tools if t not in granted]
+
+
 def build_action_server(ctx_holder, page, audit, vault, scrubber):
     """Every tool routes to the one choke point. There is no second path.
 

@@ -1,6 +1,11 @@
 from claude_agent_sdk import ClaudeAgentOptions, query
 
-from vba.act.server import SERVER_NAME, allowed_tools_for, build_action_server
+from vba.act.server import (
+    SERVER_NAME,
+    allowed_tools_for,
+    build_action_server,
+    disallowed_tools_for,
+)
 
 from .prompts import SYSTEM, render_observation, render_task
 
@@ -22,11 +27,21 @@ async def run_resolution(step, obs, ctx, negatives, deps, failure_context=None):
     docstring); max_turns and max_budget_usd are real bounded-autonomy knobs;
     effort="medium" is a real EffortLevel. No brief kwarg was renamed or
     omitted here.
+
+    Controller ruling R19: allowed_tools alone only auto-approves; it does not
+    remove a tool from the model's context. disallowed_tools is the field
+    types.py documents as actually doing that ("removed from the model's
+    context and cannot be used, even if they would otherwise be allowed"), so
+    both are passed here for enforcement point 1 to be genuine non-exposure,
+    not just auto-denial. Its type (list[str], same shape as allowed_tools)
+    matched what disallowed_tools_for already produced, so no adaptation was
+    needed.
     """
     options = ClaudeAgentOptions(
         mcp_servers={SERVER_NAME: build_action_server(
             deps.ctx_holder, deps.page, deps.audit, deps.vault, deps.scrubber)},
         allowed_tools=allowed_tools_for(step, ctx.grant),
+        disallowed_tools=disallowed_tools_for(step, ctx.grant),
         permission_mode="dontAsk",
         system_prompt=SYSTEM,
         setting_sources=["project"],     # CLAUDE.md survives compaction
