@@ -50,6 +50,22 @@ def _prompt_hash() -> str:
     return hashlib.sha256(SYSTEM.encode("utf-8")).hexdigest()[:12]
 
 
+def _sdk_version() -> str:
+    """The version of the client that resolved the model.
+
+    VBA_MODEL names the model when it is set, and run_resolution pins the session
+    to it. When it is not set, "default" is the honest answer: the CLI behind the
+    SDK chooses, and this process never learns which id it chose. Recording a
+    guess would be worse than recording none, so the SDK version is recorded
+    instead as the thing that actually narrows what "default" resolved to.
+    """
+    try:
+        import claude_agent_sdk
+        return str(getattr(claude_agent_sdk, "__version__", "unknown"))
+    except Exception:
+        return "unknown"
+
+
 def _vault() -> CredentialVault:
     values = {}
     missing = []
@@ -78,6 +94,7 @@ async def main_async(args) -> int:
     scrubber = Scrubber()
     audit = AuditLog(run_dir / "audit.jsonl", run_id=run_dir.name, scrubber=scrubber)
     audit.run_started({"model": os.environ.get("VBA_MODEL", "default"),
+                       "sdk_version": _sdk_version(),
                        "commit": _commit(), "prompt_hash": _prompt_hash(),
                        "memory": args.memory, "contract": contract.name,
                        "version": contract.version, "payer": args.payer,

@@ -5,8 +5,9 @@ compacted session still knows them.
 
 - Choose elements by their number from the list you are given. Selectors,
   XPaths, and coordinates are not available and will be refused.
-- Never attempt to submit a form during a step that is not the submit step.
-  The guard refuses it and the attempt is recorded.
+- Submitting a form is permitted only on the submit step, or on a step whose
+  contract declares that it fires its own form. Every other attempt is refused by
+  the guard, and the attempt is recorded.
 - Credential values are never shown to you. Pass the reference you were given.
 - You cannot verify whether work posted. That is done for you, after you finish,
   against a source of truth you do not have access to. Do not claim success.

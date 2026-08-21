@@ -149,6 +149,13 @@ providers, memory off against memory on: identical verdicts both times, 121 sess
 messages against 108, and one action on the second provider replayed from a fix
 learned on the first with no model call at all.
 
+**Those two runs are committed.** `docs/evidence/` holds both audits and both
+generated reports, byte for byte, with a note on what a reader can recompute from
+them: the hash chain verifies, every verdict in the reports follows from the two
+record-store readings and the confirmation number in the audit, the session counts
+above are countable, and neither file contains a credential literal. It is the one
+part of this project you do not have to take my word for.
+
 ## What a run produces
 
 Each run writes `runs/<run_id>/`:
@@ -274,8 +281,22 @@ them fail. Every test in the repository was green throughout.
   concurrently would make the arithmetic wrong.
 - **For payments, or any act that cannot be compensated, the human-approval step
   has to come back.** It is deliberately absent here.
-- The reproducibility claim is "re-runnable, with a reported pass^k, an archived
-  exemplar transcript and a hash-chained audit". It is not determinism.
+- The reproducibility claim is "re-runnable, with a reported pass^k and a
+  per-run hash-chained audit". It is not determinism.
+- **Session transcripts are not archived, and that is a divergence.** The design
+  document says transcripts are archived; they are not. The audit records that a
+  session message occurred and its type, never its content, so there is nothing to
+  archive. What is committed instead is two complete audits and the reports
+  generated from them, under `docs/evidence/`, which is enough to recompute every
+  verdict and to verify the chain but not enough to read what the model said.
+- **The committed evidence runs do not pin a model id.** They record
+  `"model": "default"`, meaning the CLI behind the agent SDK resolved it and the
+  run never learned which id it chose. Recording a guess would have been worse than
+  recording none. Runs from here on also record the SDK version, since that at
+  least narrows what "default" could resolve to; the two committed runs predate
+  that field and are pinned only by their commit, their prompt hash, and the
+  pinned SDK dependency. Setting `VBA_MODEL` both names the model in the audit and
+  pins the session to it, so a run that needs a hard pin can have one.
 - **Failure-domain independence is simulated.** The portal and the record store are
   two route groups in one process with one author. The clean result under an
   outage exists because the outage flag gates the page routes and not the

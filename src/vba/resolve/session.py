@@ -1,3 +1,5 @@
+import os
+
 from claude_agent_sdk import ClaudeAgentOptions, query
 
 from vba.act.server import (
@@ -48,6 +50,15 @@ async def run_resolution(step, obs, ctx, negatives, deps, failure_context=None):
         max_turns=MAX_TURNS,
         max_budget_usd=MAX_BUDGET_USD,
         effort="medium",
+        # Spec 7.1 wants the model recorded with the run. Recording an id the
+        # session did not actually use would be worse than recording none, so the
+        # env var that names the model in run_started is the same one that pins it
+        # here. Unset means the CLI's own default resolves it, which is what the
+        # committed evidence runs did, and the SDK version in run_started is the
+        # only pin those have. ClaudeAgentOptions.model is str | None with None
+        # meaning "the CLI default", verified against the installed
+        # claude_agent_sdk 0.2.139 types.py, so passing None changes nothing.
+        model=os.environ.get("VBA_MODEL") or None,
     )
     # Both halves are scrubbed. The observation always was; the task text carries
     # world-authored refusal excerpts and the run's own bindings, so spec 4.4's
