@@ -181,10 +181,28 @@ async def test_layout_b_record_page_and_bounce_page_fingerprint_differently(
     )
 
 
-async def test_no_identifier_ever_exceeds_its_baseline_by_more_than_one(world):
-    """Spec 7.2: a global postcondition, asserted after every world test rather than
-    as a standalone case that could pass vacuously."""
+async def test_no_identifier_ever_exceeds_its_baseline_by_more_than_one(world, reset_world):
+    """Spec 7.2: a global postcondition over the real table.
+
+    This test provisions its own row rather than relying on residue left by tests
+    that ran earlier in the file: every other test's setup calls reset_world,
+    which wipes the SoR, so a version of this test that only reads the table
+    without writing to it first would run over an empty table and pass
+    vacuously -- exactly what the docstring used to (wrongly) claim it guarded
+    against. Reset (layout A), perform one real enrollment over HTTP for a
+    normal provider (the same login/verify/enroll flow as
+    test_a_normal_provider_confirms), then assert both that the table is
+    genuinely non-empty and that no identifier appears more than once. Since the
+    reset just zeroed every baseline to 0, "exceeds its baseline by more than
+    one" here means "appears more than once".
+    """
+    with httpx.Client(base_url=world, follow_redirects=True, timeout=10) as c:
+        c.post("/login", data={"username": USERNAME, "password": PASSWORD})
+        c.post("/verify", data={"code": OTP_CODE, "captcha": "1"})
+        c.post("/provider/" + NORMAL_NPI + "/enroll", data={"payer": "Aetna"})
+
     rows = httpx.get(world + "/api/sor/enrollments", timeout=5).json()["enrollments"]
+    assert rows, "the table must be non-empty here, or this postcondition is vacuous"
     counts = {}
     for r in rows:
         counts[r["npi"]] = counts.get(r["npi"], 0) + 1
