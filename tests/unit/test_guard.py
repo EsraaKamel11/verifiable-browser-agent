@@ -5,6 +5,8 @@ from vba.act.choke import execute
 from vba.contract.gate import Grant
 from vba.contract.schema import Step
 from vba.guard.tiers import GuardRefusal, check
+from vba.guard.credentials import CredentialVault
+from vba.guard.scrub import Scrubber
 from vba.perceive.elements import Observation, elements_from_records
 
 
@@ -137,9 +139,11 @@ async def test_a_refused_action_produces_no_side_effect():
     a = Action(kind="click", target_id=1, value=None, step_key="provider.open", epoch=7)
     page = FakePage()
     audit = FakeAudit()
+    vault = CredentialVault({})
+    scrubber = Scrubber()
 
     with pytest.raises(GuardRefusal):
-        await execute(a, _ctx(TIER1), page, audit)
+        await execute(a, _ctx(TIER1), page, audit, vault, scrubber)
 
     # No side effects recorded
     assert len(page.calls) == 0, "guard refusal should prevent any page calls"
@@ -152,8 +156,10 @@ async def test_a_permitted_action_reaches_the_browser_after_guard_passes():
     a = Action(kind="click", target_id=0, value=None, step_key="provider.open", epoch=7)
     page = FakePage()
     audit = FakeAudit()
+    vault = CredentialVault({})
+    scrubber = Scrubber()
 
-    await execute(a, _ctx(TIER1), page, audit)
+    await execute(a, _ctx(TIER1), page, audit, vault, scrubber)
 
     # Exactly one browser call with the correct selector
     assert len(page.calls) == 1
