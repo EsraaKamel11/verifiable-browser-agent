@@ -1,9 +1,10 @@
 from vba.guard.tiers import check
+from vba.guard.credentials import resolve_fill_value
 
 from .actions import Action, ActionContext
 
 
-async def execute(action: Action, ctx: ActionContext, page, audit) -> None:
+async def execute(action: Action, ctx: ActionContext, page, audit, vault, scrubber) -> None:
     """The single path to a side effect. Spec 3.1, 4.3.
 
     Nothing else in this codebase may call Playwright's mutating methods. If a second
@@ -17,7 +18,8 @@ async def execute(action: Action, ctx: ActionContext, page, audit) -> None:
     if action.kind in ("click", "submit"):
         await page.click(sel)
     elif action.kind == "fill":
-        await page.fill(sel, action.value or "")
+        value = resolve_fill_value(action, ctx, vault, scrubber)
+        await page.fill(sel, value)
     elif action.kind == "select":
         await page.select_option(sel, action.value or "")
     elif action.kind == "hover":
