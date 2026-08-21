@@ -74,3 +74,16 @@ def test_an_already_enrolled_baseline_is_already_satisfied():
     """Spec 5.3: never submit when the record already shows the work is done."""
     assert _adj(R(1, latest=GOOD_ROW), R(1, latest=GOOD_ROW),
                 PageVerdict.PASSED) is Outcome.ALREADY_SATISFIED
+
+
+def test_a_delta_of_one_with_matching_identity_but_no_page_confirmation_is_discrepancy():
+    """Spec 5.3: CONFIRMED requires three agreements: count +1, identity match, and
+    page confirmation appears in the record. Missing confirmation is treated like a
+    non-matching one: not confirmed, escalates for review."""
+    assert _adj(R(0), R(1, latest=GOOD_ROW), PageVerdict.PASSED, conf=None) is Outcome.DISCREPANCY
+
+
+def test_an_unreachable_baseline_is_unverifiable():
+    """Unknown baseline state is not a confirmed-zero starting point. Cannot apply delta
+    logic from unknown state; reachability must be verified before confirming any work."""
+    assert _adj(R(0, reachable=False), R(1, latest=GOOD_ROW), PageVerdict.PASSED) is Outcome.UNVERIFIABLE

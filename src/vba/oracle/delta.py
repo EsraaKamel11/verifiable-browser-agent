@@ -54,8 +54,13 @@ def adjudicate(
 
     Absolute predicates would confirm work the agent never did, because a row left
     over from an earlier run satisfies "enrolled" without the agent having acted.
+    Unknown baseline state is not a confirmed-zero starting point: reachability must
+    be verified before applying delta logic.
     """
     if not after.reachable:
+        return Outcome.UNVERIFIABLE
+
+    if not baseline.reading.reachable:
         return Outcome.UNVERIFIABLE
 
     if baseline.reading.reachable and baseline.reading.count > 0:
@@ -70,7 +75,7 @@ def adjudicate(
         row = after.latest
         if not _identity_matches(row, expected_identity):
             return Outcome.MISFILED
-        if page_confirmation and row.get("confirmation_id") != page_confirmation:
+        if not page_confirmation or row.get("confirmation_id") != page_confirmation:
             return Outcome.DISCREPANCY
         return Outcome.CONFIRMED
 
