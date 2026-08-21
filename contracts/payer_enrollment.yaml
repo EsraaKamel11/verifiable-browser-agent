@@ -1,0 +1,41 @@
+contract: payer_enrollment
+version: 3
+site: enrollment_portal
+goal: "Enroll a provider with their payer and confirm it posted to the payer's records."
+
+oracle:
+  kind: http_json
+  url: "{base}/api/sor/enrollment/{npi}"
+  strength: cross_system            # cross_system | on_page | none
+
+identity:
+  key: [npi, payer]
+  resolve_ambiguity_by: oracle      # never by retry
+
+steps:
+  - step_key: portal.login
+    intent: "sign in with the team credentials"
+    tier: 2
+    credentials: {ref: portal, fields: [email, password]}
+  - step_key: portal.verify_2fa
+    intent: "enter the authenticator code and confirm the not-a-robot checkbox"
+    tier: 2
+    credentials: {ref: portal, fields: [otp]}
+  - step_key: provider.open
+    intent: "open the record for provider {npi}"
+    tier: 1
+  - step_key: enrollment.select_payer
+    intent: "select the payer named in the contract"
+    tier: 2
+  - step_key: enrollment.submit
+    intent: "file this enrollment with the payer"
+    tier: 3
+    preconditions: [oracle.baseline_read]
+    satisfied_when: oracle.confirmed
+    postconditions:                 # deterministic page_verify predicates
+      - text_present: "Submitted successfully"
+      - text_absent: "Please confirm you have reviewed"
+
+pii:
+  redact: [password, otp]
+  never_screenshot_urls: ["/", "/login", "/verify"]

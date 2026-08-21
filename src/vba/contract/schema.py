@@ -1,0 +1,64 @@
+from typing import Literal
+
+from pydantic import BaseModel, Field, model_validator
+
+
+class ContractError(Exception):
+    pass
+
+
+class Oracle(BaseModel):
+    kind: Literal["http_json"]
+    url: str
+    strength: Literal["cross_system", "on_page", "none"]
+
+
+class Identity(BaseModel):
+    key: list[str]
+    resolve_ambiguity_by: Literal["oracle"]
+
+
+class CredentialRef(BaseModel):
+    ref: str
+    fields: list[str]
+
+
+class Postcondition(BaseModel):
+    text_present: str | None = None
+    text_absent: str | None = None
+
+
+class Step(BaseModel):
+    step_key: str
+    intent: str
+    tier: int = Field(ge=1, le=3)
+    credentials: CredentialRef | None = None
+    preconditions: list[str] = Field(default_factory=list)
+    satisfied_when: str | None = None
+    postconditions: list[Postcondition] = Field(default_factory=list)
+
+
+class Pii(BaseModel):
+    redact: list[str] = Field(default_factory=list)
+    never_screenshot_urls: list[str] = Field(default_factory=list)
+
+
+class Contract(BaseModel):
+    name: str = Field(alias="contract")
+    version: int
+    site: str
+    goal: str
+    oracle: Oracle | None = None
+    identity: Identity
+    steps: list[Step]
+    pii: Pii
+
+    @model_validator(mode="after")
+    def _tier3_requires_satisfied_when(self):
+        for s in self.steps:
+            if s.tier == 3 and not s.satisfied_when:
+                raise ContractError(
+                    "step " + repr(s.step_key) + " is tier 3 but declares no "
+                    "satisfied_when; a tier-3 act must read a baseline it will check"
+                )
+        return self
