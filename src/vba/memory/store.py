@@ -166,6 +166,24 @@ class FixStore:
             ).fetchone()
         return self._hydrate(row) if row else None
 
+    def current_positive(self, site: str, contract: str,
+                         step_key: str) -> LearnedFix | None:
+        """The fix a write would supersede, whatever its provenance. Ruling R4.
+
+        lookup() answers "what may be pre-applied", so it filters on provenance and
+        cannot see an unpromoted candidate that a new write is about to replace.
+        This answers the different question "what is about to be replaced", so the
+        supersede event names the right fix. Read-only; write_candidate still does
+        the valid_to write itself.
+        """
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM learned_fix WHERE site = ? AND contract = ? "
+                "AND step_key = ? AND polarity = 'positive' AND valid_to IS NULL",
+                (site, contract, step_key),
+            ).fetchone()
+        return self._hydrate(row) if row else None
+
     def negatives_for(self, site: str, contract: str, step_key: str) -> list[LearnedFix]:
         with self._conn() as c:
             rows = c.execute(

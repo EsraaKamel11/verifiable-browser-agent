@@ -21,3 +21,9 @@ class ActionContext:
     grant: Any       # contract.gate.Grant
     observation: Any # perceive.elements.Observation
     baseline: Any    # oracle.delta.Baseline | None
+    # Ruling R12. Where this action's shape came from: "cold" for a resolution
+    # session, "memory:<fix_id>" for a replayed fix. AuditLog.action_permitted
+    # stamps it onto every action record, which is the only evidence a warm run
+    # reused memory instead of resolving again. It is EVIDENCE, never authority:
+    # the guard cannot see it, and both provenances traverse the same checks.
+    source: str = "cold"

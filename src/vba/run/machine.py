@@ -1,10 +1,8 @@
 from vba.oracle.delta import Outcome
-from vba.memory.capture import slice_capture, to_stored_actions
-from vba.oracle.delta import Baseline, PageVerdict, adjudicate
-from vba.verify.page import page_verify
 
+from .drive import run_step
 from .escalate import reason_for
-from .outcomes import RunResult, StepOutcome
+from .outcomes import RunResult
 
 # Spec 5.3. The routing is a table rather than control flow so it can be tested
 # exhaustively and so no branch is reachable only through a live browser.
@@ -31,7 +29,6 @@ def next_transition(outcome: Outcome, attempts: int, budget: int) -> str:
 RESOLVE_BUDGET = 3
 
 
-# run_step() is imported from .drive in Task 14 (src/vba/run/drive.py)
 async def run_entity(contract, bindings, deps) -> RunResult:
     """Spec 5.1. One entity through every step of the contract."""
     result = RunResult(entity=dict(bindings))
