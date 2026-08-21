@@ -1,5 +1,6 @@
 # src/vba/perceive/snapshot.py
 from .elements import Observation, elements_from_records
+from .fingerprint import fingerprint
 
 EXTRACT_JS = """
 () => {
@@ -81,11 +82,13 @@ EXTRACT_JS = """
 """
 
 
-async def snapshot(page, epoch: int) -> Observation:
+async def snapshot(page, epoch: int, contract: str, step_key: str) -> Observation:
     records = await page.evaluate(EXTRACT_JS)
+    elements = elements_from_records(records)
     return Observation(
         url=page.url,
         epoch=epoch,
-        elements=elements_from_records(records),
+        elements=elements,
         text=await page.inner_text("body"),
+        fingerprint=fingerprint(contract, step_key, page.url, elements),
     )
