@@ -390,7 +390,7 @@ Selection state is excluded: which option is currently selected is state, not st
 
 Accessible-name comparison is reserved for `exact_identity` enforcement at act time, where a stored name is either static or fully templated and bound before comparison.
 
-**This must be validated against the real snapshot tool before the design is final.** If accessible names in practice do not absorb field values, the constraint relaxes; if they do, it is load-bearing. First-hour empirical check.
+**Validated (2026-08-20) against the real snapshot tool.** See `docs/findings/2026-08-20-accname-probe.md`: on the vendored world's provider record page (Playwright 1.49.0, Chromium), the NPI field -- an embedded, read-only input inside its own `<label>NPI <input .../></label>` -- produced an accessibility-tree node with `name: "NPI "` and a separate `value: "1700000001"`. The name did not absorb the value. Names do not absorb values in this snapshot tool, so the constraint relaxes: it is no longer load-bearing. The attribute-level fingerprint is still built as specced, because it remains more robust regardless (buttons still need id+text to disambiguate layouts whose named inputs are otherwise identical), but its justification is now prudence, not necessity.
 
 ### 6.3 Capture
 
@@ -581,6 +581,6 @@ Built: the contract schema and acceptance gate, one compiled workflow, the perce
 
 ## 11. Open questions
 
-1. **Do accessible names absorb field values in the chosen snapshot tool?** Decides whether the attribute-level fingerprint constraint is load-bearing or merely prudent. First-hour empirical check.
+1. **Do accessible names absorb field values in the chosen snapshot tool?** Decides whether the attribute-level fingerprint constraint is load-bearing or merely prudent. First-hour empirical check. **Resolved 2026-08-20: no** -- see `docs/findings/2026-08-20-accname-probe.md` and 6.2.
 2. **Can the runtime's client read the portal's resource surface**, or only its tool surface? Affects whether a declared status resource is inside the perception surface.
 3. **Does phase 2's element-relative drawing satisfy the world's signature validation** without a raw viewport coordinate? If not, the invariant needs restating rather than abandoning.

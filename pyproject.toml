@@ -1,0 +1,26 @@
+[project]
+name = "vba"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "claude-agent-sdk==0.2.139",
+    "playwright==1.49.0",
+    "pydantic==2.12.5",
+    "httpx==0.28.1",
+    "pyyaml==6.0.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==8.4.2", "pytest-asyncio==0.24.0", "pydantic-evals==2.31.0"]
+world = ["fastapi==0.115.6", "uvicorn==0.34.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "world: needs the target world running on 127.0.0.1:8799",
+    "evals: needs a model API key and costs money",
+]
