@@ -133,7 +133,7 @@ async def main_async(args) -> int:
             # 3.4 becomes a change to this loop rather than a restructuring.
             page = await (await browser.new_context()).new_page()
             await page.goto(BASE + "/")
-            deps = Deps(page=page, audit=audit, vault=vault, scrubber=scrubber,
+            deps = Deps(page=page, pii=contract.pii, audit=audit, vault=vault, scrubber=scrubber,
                         store=store, oracle=oracle, ctx_holder=CtxHolder(),
                         grant=grant, contract_name=contract.name,
                         memory_enabled=args.memory,

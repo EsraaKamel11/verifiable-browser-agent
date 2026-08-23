@@ -1,9 +1,12 @@
+import os
 import re
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any, Iterator
 
 from vba.act.actions import Action, ActionContext
 from vba.act.choke import execute
+from vba.guard.credentials import should_screenshot
 from vba.guard.tiers import GuardRefusal
 from vba.memory.capture import confidence, slice_capture, to_stored_actions
 from vba.memory.store import LearnedFix, StoredAction
@@ -100,7 +103,37 @@ class CtxHolder:
             source=prev.source,
         )
         self.set_observation(obs)
+        await self._capture(obs)
         return obs
+
+    async def _capture(self, obs) -> None:
+        """Demo tooling, off unless VBA_CAPTURE names a directory.
+
+        It captures through should_screenshot, which the contract's
+        never_screenshot_urls populates, so the auth pages are skipped rather than
+        written and later deleted. Spec 4.4 names capture suppression as the
+        load-bearing control on those pages, because the world's authenticator
+        field is not a password input and renders its code in the clear.
+        """
+        out = os.environ.get("VBA_CAPTURE")
+        if not out:
+            return
+        deps = self._deps
+        pii = getattr(deps, "pii", None)
+        if pii is not None and not should_screenshot(obs.url, pii):
+            return
+        directory = Path(out)
+        directory.mkdir(parents=True, exist_ok=True)
+        # The entity is in the name because every entity restarts the epoch
+        # counter, so a multi-entity run would otherwise overwrite its own frames
+        # and keep only the last provider's.
+        entity = "-".join(str(v) for v in (getattr(deps, "bindings", {}) or {}).values())
+        name = (entity + "-" if entity else "") \
+            + str(obs.epoch).zfill(3) + "-" + self._step.step_key + ".png"
+        try:
+            await deps.page.screenshot(path=str(directory / name))
+        except Exception:
+            pass          # a capture failure must never affect the run
 
 
 def _restamp(baseline, epoch: int):

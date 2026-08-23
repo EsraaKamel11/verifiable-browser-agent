@@ -20,6 +20,10 @@ class Deps:
     ctx_holder: Any
     grant: Any
     contract_name: str = ""
+    # The contract's PII policy. Only screenshot capture consults it, so it is
+    # optional: a Deps built without one captures nothing rather than
+    # over-capturing an auth page (spec 4.4).
+    pii: Any = None
     # The entity this run is about, set by run_step from the invocation's bindings.
     # It is carried here rather than added to run_resolution's signature so the
     # canonical interface (ruling R18) is unchanged; the resolution prompt reads it
