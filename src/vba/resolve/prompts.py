@@ -22,8 +22,31 @@ Rules:
 """
 
 
+MAX_PAGE_TEXT = 800
+
+
 def render_observation(obs: Observation, scrubber: Scrubber) -> str:
-    lines = ["URL: " + obs.url, "", "Elements:"]
+    """The whole of the model's evidence about the page.
+
+    The page text is included, not only the controls. A page whose meaning is prose
+    rather than controls is otherwise invisible: the world's review-required bounce
+    renders as a single Back link, and a resolver shown only that cannot read the
+    sentence naming what it must do. Perception already captures this text for
+    page_verify; withholding it from the model made the resolver blind on exactly
+    the pages where the reason for failure is written down.
+
+    Bounded, because a long record page would otherwise crowd out the element list,
+    and scrubbed, because this is an outbound payload (spec 4.4).
+    """
+    lines = ["URL: " + obs.url]
+
+    text = " ".join((obs.text or "").split())
+    if text:
+        if len(text) > MAX_PAGE_TEXT:
+            text = text[:MAX_PAGE_TEXT] + " [truncated]"
+        lines += ["", "Page text:", "  " + text]
+
+    lines += ["", "Elements:"]
     for e in obs.elements:
         bits = [str(e.target_id) + ".", e.role, repr(e.name)]
         if e.element_id:

@@ -120,7 +120,13 @@ async def main_async(args) -> int:
 
     results = []
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch()
+        # Demo tooling, not agent behaviour: VBA_HEADFUL=1 shows the browser and
+        # VBA_SLOWMO paces it so a person can follow what the resolver is doing.
+        # Neither changes what the agent perceives, decides, or records.
+        browser = await pw.chromium.launch(
+            headless=os.environ.get("VBA_HEADFUL", "") != "1",
+            slow_mo=int(os.environ.get("VBA_SLOWMO", "0")),
+        )
         for npi in args.providers:
             # One browser context per provider. Sessions and cookies do not leak
             # between entities, and the provider-level concurrency exhibit in spec
