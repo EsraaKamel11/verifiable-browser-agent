@@ -223,7 +223,7 @@ async def test_an_intact_control_on_a_changed_form_is_caught_by_the_fingerprint_
 
     The stored control keeps its id and its accessible name, so still_resolves says
     yes and resolution cannot defeat pre-apply. The form around it now requires a
-    review step, which the world's layout B shows is a genuine mid-run
+    review step, which the world's layout B shows is a genuine mid-run vendor
     change. Only the structural fingerprint can refuse this, and it must.
     """
     contract = load_contract(CONTRACT)

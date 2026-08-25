@@ -109,7 +109,7 @@ python -m venv .venv
 
 - [ ] **Step 2: Vendor the world**
 
-Copy every `.py` file from `the seeding scenario's world files:` into `world/`. It uses flat imports (`import system_of_record`), so it runs as a subprocess from its own directory and is never imported by `src/vba`.
+The world's `.py` files were vendored in whole from the scenario that seeded this project. They use flat imports (`import system_of_record`), so the world runs as a subprocess from its own directory and is never imported by `src/vba`.
 
 Write `world/README.md` stating: this is the target simulation, vendored so the evaluation is reproducible; it was authored by the same author as the agent, which spec section 10.1 addresses directly.
 

@@ -2,7 +2,7 @@
 
 This is the source of truth for whether an enrollment actually posted. The
 portal's on-screen "Submitted successfully" page is NOT proof; a row here is.
-The tested agent's agent is expected to reconcile against this via the read API
+The agent under test is expected to reconcile against this via the read API
 (/api/sor/enrollment/{npi}) after every submit.
 
 Backed by a SQLite file so state survives and the harness can inspect it.

@@ -1,10 +1,10 @@
 """Seed data for the PayerConnect staging portal.
 
-HARNESS-SIDE ONLY. The tested agent never reads this; they get the
-subset in the runtime environment (URL, login, 2FA code, provider list) at start.
+HARNESS-SIDE ONLY. The agent under test never reads this file; it gets the
+runtime subset (URL, login, 2FA code, provider list) through its environment.
 """
 
-# Staging credentials shared with the tested agent at start (see the runtime environment).
+# Staging credentials the harness hands the agent through its environment.
 STAGING_USERNAME = "ops@cascade-credentialing.example"
 STAGING_PASSWORD = "Staging2026!"          # staging only, not a real secret
 STAGING_2FA_CODE = "246810"                # rotating 2FA is disabled on staging; fixed test code

@@ -172,7 +172,7 @@ differs:
   refused; the assertion is that the fingerprint got there first and left an event.
 - **Variant B, the hard branch.** The submit control is untouched, id and
   accessible name alike, and the form gains the mandatory review checkbox that the
-  world's layout B uses as a real mid-run change. `still_resolves` answers
+  world's layout B uses as a real mid-run vendor change. `still_resolves` answers
   **true** here, so resolution could not have refused the fix. The fingerprint did:
   `stale_fix_detected`, cold resolution, no replay.
 

@@ -1,8 +1,8 @@
 """PayerConnect (staging) - a synthetic payer enrollment portal for Cascade Credentialing.
 
-This is the counterparty's system, simulated. An implementer building automation against it gets a
-URL and credentials (see the runtime environment), never this source. harness / client
-own this file.
+This is the counterparty's system, simulated. The agent under test gets a URL
+and credentials, never this source: the whole point of the exercise is that
+the portal's internals are unknown to the thing automating it.
 
 What it deliberately models:
   - Authorized-session automation: login + a fixed staging 2FA code + a mock captcha.
