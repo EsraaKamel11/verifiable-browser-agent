@@ -131,7 +131,20 @@ async def main_async(args) -> int:
             # One browser context per provider. Sessions and cookies do not leak
             # between entities, and the provider-level concurrency exhibit in spec
             # 3.4 becomes a change to this loop rather than a restructuring.
-            page = await (await browser.new_context()).new_page()
+            #
+            # VBA_VIDEO is demo tooling in the VBA_HEADFUL sense: it names a
+            # directory and Playwright records the context's video there.
+            # Recording observes the page the agent already renders; it changes
+            # nothing the agent perceives, decides, or records, and the capture
+            # PII policy does not apply because the video shows exactly what a
+            # shoulder-surfer at the demo would see anyway.
+            ctx_kwargs = {}
+            video_dir = os.environ.get("VBA_VIDEO", "")
+            if video_dir:
+                ctx_kwargs["record_video_dir"] = video_dir
+                ctx_kwargs["record_video_size"] = {"width": 1280, "height": 800}
+                ctx_kwargs["viewport"] = {"width": 1280, "height": 800}
+            page = await (await browser.new_context(**ctx_kwargs)).new_page()
             await page.goto(BASE + "/")
             deps = Deps(page=page, pii=contract.pii, audit=audit, vault=vault, scrubber=scrubber,
                         store=store, oracle=oracle, ctx_holder=CtxHolder(),
@@ -144,6 +157,13 @@ async def main_async(args) -> int:
             results.append(await run_entity(contract,
                                             {"npi": npi, "payer": args.payer},
                                             deps))
+            # Demo tooling in the VBA_HEADFUL sense: a recording tail, so the
+            # page the entity ended on is visibly in the context's video
+            # before the next context starts or the browser closes. Off by
+            # default; changes nothing the agent perceives, decides, records.
+            tail_s = float(os.environ.get("VBA_DEMO_TAIL", "0") or 0)
+            if tail_s:
+                await page.wait_for_timeout(int(tail_s * 1000))
             if deps.halt_run:
                 break
         await browser.close()
