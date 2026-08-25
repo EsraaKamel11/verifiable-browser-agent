@@ -1,0 +1,38 @@
+# Two keyless tiers, split so a red names its layer. The evals and heldout
+# tiers spend money on a live model and never run here; the README's numbers
+# for those come from recorded runs committed under docs/evidence.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  unit:
+    name: unit (no server, no key)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev,world]"
+      - run: playwright install chromium --with-deps
+      # A bare pytest runs the keyless tier only; addopts deselects the
+      # world, evals and heldout markers.
+      - run: pytest -q
+
+  world:
+    name: world (real server, real browser, no model)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev,world]"
+      - run: playwright install chromium --with-deps
+      # The tier spawns and tears down the world itself; -m on the command
+      # line replaces the pyproject addopts.
+      - run: pytest tests/world -q -m world
